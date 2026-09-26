@@ -717,7 +717,7 @@ export function Workspace({
                   <button 
                     type="button" 
                     onClick={() => onNavigateScreen('model-attach')} 
-                    style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '0.74rem', textDecoration: 'underline' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontSize: '0.74rem', textDecoration: 'underline' }}
                   >
                     Configure Model
                   </button>
@@ -726,7 +726,7 @@ export function Workspace({
                   <button 
                     type="button" 
                     onClick={() => onNavigateScreen('projects')} 
-                    style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '0.74rem', textDecoration: 'underline' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', fontSize: '0.74rem', textDecoration: 'underline' }}
                   >
                     View Project
                   </button>

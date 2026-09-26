@@ -93,6 +93,21 @@ export function executeThemeTransition(nextTheme, event, callbacks = {}) {
       return;
     }
 
+    // Top Layer activation: promote to topmost browser layer above all UI elements
+    if (overlay) {
+      try {
+        if (typeof overlay.showModal === 'function' && !overlay.open) {
+          overlay.showModal();
+        }
+      } catch {
+        try {
+          if (typeof overlay.showPopover === 'function' && !overlay.matches?.(':popover-open')) {
+            overlay.showPopover();
+          }
+        } catch {}
+      }
+    }
+
     // 1. Single expanding orbit wave in exact lockstep
     orbitScaler.animate(
       [

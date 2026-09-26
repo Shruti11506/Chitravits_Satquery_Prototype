@@ -254,3 +254,114 @@
   .st-fields { width: 100%; }
   .st-row { grid-template-columns: 1fr; gap: 6px; }
 }
+
+/* ==========================================================================
+   LIGHT MODE READABILITY & CONTRAST OVERRIDES FOR SETTINGS PAGE
+   ========================================================================== */
+[data-theme="light"] .st-head {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .st-title {
+  color: #020617;
+}
+
+[data-theme="light"] .st-subtitle {
+  color: #0369a1;
+  font-weight: 600;
+}
+
+[data-theme="light"] .st-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .st-card-title {
+  color: #020617;
+}
+
+[data-theme="light"] .st-card-sub,
+[data-theme="light"] .st-footnote {
+  color: #334155;
+  font-weight: 500;
+}
+
+[data-theme="light"] .st-avatar-btn {
+  background: #ffffff;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+[data-theme="light"] .st-avatar-btn:hover {
+  background: #f1f5f9;
+  border-color: #2563eb;
+}
+
+[data-theme="light"] .st-row-label {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .st-select {
+  background: #ffffff;
+  border-color: #94a3b8;
+  color: #020617;
+  font-weight: 500;
+}
+
+[data-theme="light"] .st-select:hover {
+  border-color: #2563eb;
+}
+
+[data-theme="light"] .st-select:focus-visible {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
+[data-theme="light"] .st-select option {
+  background: #ffffff;
+  color: #020617;
+}
+
+[data-theme="light"] .st-select-chevron {
+  color: #334155;
+}
+
+[data-theme="light"] .st-toggle-label {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .st-toggle-desc {
+  color: #334155;
+}
+
+[data-theme="light"] .st-switch {
+  background: #cbd5e1;
+  border-color: #94a3b8;
+}
+
+[data-theme="light"] .st-switch[aria-checked="true"] {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+[data-theme="light"] .st-switch-thumb {
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+}
+
+[data-theme="light"] .st-account-note {
+  color: #334155;
+}
+
+[data-theme="light"] .st-notice {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  font-weight: 500;
+}
+

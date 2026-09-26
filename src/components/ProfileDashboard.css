@@ -21,21 +21,21 @@
   --pf-hero-overlay: linear-gradient(90deg, rgba(3, 7, 16, 0.97) 0%, rgba(3, 7, 16, 0.88) 45%, rgba(3, 7, 16, 0.3) 100%);
 }
 [data-theme="light"] {
-  --pf-surface: rgba(255, 255, 255, 0.9);
-  --pf-surface-raised: #ffffff;
-  --pf-line: rgba(160, 195, 230, 0.7);
-  --pf-track: rgba(15, 56, 102, 0.08);
-  --pf-bar: linear-gradient(90deg, #113f70, #1b73c9);
-  --pf-heat-0: rgba(15, 56, 102, 0.07);
-  --pf-heat-1: #a9c9ec;
-  --pf-heat-2: #4f8fd3;
-  --pf-heat-3: #0f3866;
-  --pf-cyan: #0e7490;
+  --pf-surface: #ffffff;
+  --pf-surface-raised: #f8fafc;
+  --pf-line: #cbd5e1;
+  --pf-track: #e2e8f0;
+  --pf-bar: linear-gradient(90deg, #1d4ed8, #0284c7);
+  --pf-heat-0: #e2e8f0;
+  --pf-heat-1: #93c5fd;
+  --pf-heat-2: #2563eb;
+  --pf-heat-3: #1e3a8a;
+  --pf-cyan: #0369a1;
   --pf-violet: #6d28d9;
   --pf-amber: #b45309;
   --pf-good: #047857;
   --pf-bad: #b91c1c;
-  --pf-hero-overlay: linear-gradient(90deg, rgba(243, 248, 254, 0.97) 0%, rgba(243, 248, 254, 0.88) 45%, rgba(243, 248, 254, 0.35) 100%);
+  --pf-hero-overlay: linear-gradient(90deg, rgba(241, 245, 249, 0.98) 0%, rgba(241, 245, 249, 0.9) 45%, rgba(241, 245, 249, 0.35) 100%);
 }
 
 .pf-page {
@@ -563,3 +563,206 @@
   .pf-recent-item { grid-template-columns: 30px minmax(0, 1fr); }
   .pf-recent-side { grid-column: 2; flex-direction: row; align-items: center; justify-content: space-between; }
 }
+
+/* ==========================================================================
+   LIGHT MODE READABILITY & CONTRAST OVERRIDES FOR PROFILE DASHBOARD
+   ========================================================================== */
+[data-theme="light"] .pf-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .pf-card-title {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-card-sub,
+[data-theme="light"] .pf-footnote {
+  color: #334155;
+  font-weight: 500;
+}
+
+[data-theme="light"] .pf-name {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-handle-row {
+  color: #0f172a;
+}
+
+[data-theme="light"] .pf-bio {
+  color: #334155;
+  font-weight: 500;
+}
+
+[data-theme="light"] .pf-btn {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .pf-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  border-color: #0f172a;
+  color: #020617;
+}
+
+[data-theme="light"] .pf-btn-primary {
+  background: var(--accent-gradient);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+[data-theme="light"] .pf-stat {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .pf-stat-value {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-stat-unit {
+  color: #0f172a;
+}
+
+[data-theme="light"] .pf-stat-label {
+  color: #334155;
+  font-weight: 600;
+}
+
+/* Heatmap Labels */
+[data-theme="light"] .pf-heat-months {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+[data-theme="light"] .pf-heat-days {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+[data-theme="light"] .pf-heat-foot {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+[data-theme="light"] .pf-strip-labels {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+/* Insights & Bars */
+[data-theme="light"] .pf-insight {
+  border-bottom-color: #e2e8f0;
+}
+
+[data-theme="light"] .pf-insight-label {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+[data-theme="light"] .pf-insight-value {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-bar-name {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .pf-bar-count {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-bar-count span {
+  color: #334155;
+  font-weight: 600;
+}
+
+/* Usage Tiles */
+[data-theme="light"] .pf-usage-tile {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .pf-usage-head {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-usage-pct {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-usage-meta {
+  color: #334155;
+}
+
+[data-theme="light"] .pf-usage-meta strong {
+  color: #020617;
+}
+
+/* Recent Activity */
+[data-theme="light"] .pf-recent-item {
+  border-bottom-color: #e2e8f0;
+}
+
+[data-theme="light"] .pf-recent-type {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+[data-theme="light"] .pf-recent-label {
+  color: #020617;
+  font-weight: 500;
+}
+
+[data-theme="light"] .pf-recent-time {
+  color: #475569;
+}
+
+/* Dialog & Form */
+[data-theme="light"] .pf-dialog-overlay {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+[data-theme="light"] .pf-dialog {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  color: #020617;
+}
+
+[data-theme="light"] .pf-dialog-title {
+  color: #020617;
+}
+
+[data-theme="light"] .pf-dialog-desc {
+  color: #334155;
+}
+
+[data-theme="light"] .pf-field label {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .pf-input,
+[data-theme="light"] .pf-textarea {
+  background: #ffffff;
+  border-color: #94a3b8;
+  color: #020617;
+  font-weight: 500;
+}
+
+[data-theme="light"] .pf-input:focus,
+[data-theme="light"] .pf-textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
+[data-theme="light"] .pf-field-hint {
+  color: #334155;
+}
+

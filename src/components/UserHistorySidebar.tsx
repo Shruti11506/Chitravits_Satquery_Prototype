@@ -390,8 +390,16 @@ export function UserHistorySidebar({
   // configured) -- shown under the error so setup problems aren't a mystery.
   const [errorDetail, setErrorDetail] = React.useState<string | null>(null)
   const [openMenuKey, setOpenMenuKey] = React.useState<string | null>(null)
-  const { isMobile, setOpenMobile } = useSidebar()
+  const { isMobile, setOpenMobile, setOpen } = useSidebar()
   const hasLoadedRef = React.useRef(false)
+
+  const dismissSidebar = React.useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false)
+    } else {
+      setOpen(false)
+    }
+  }, [isMobile, setOpenMobile, setOpen])
 
   const [isProfileMenuOpen, setIsProfileMenuOpen] = React.useState(false)
   const profileTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -444,9 +452,7 @@ export function UserHistorySidebar({
   const handleItemClick = (entry: SidebarEntry) => {
     if (entry.kind === "conversation") onSelectConversation(entry.conversation)
     else onSelectHistoryItem(entry.item)
-    if (isMobile) {
-      setOpenMobile(false)
-    }
+    dismissSidebar()
   }
 
   const handleRename = async (conversation: Conversation, title: string) => {
@@ -501,7 +507,7 @@ export function UserHistorySidebar({
             className="flex items-center gap-2 px-1 cursor-pointer hover:opacity-90 transition-opacity"
             onClick={() => {
               onNewChat()
-              if (isMobile) setOpenMobile(false)
+              dismissSidebar()
             }}
             title="SatQuery AI - New Analysis"
           >
@@ -514,16 +520,6 @@ export function UserHistorySidebar({
           </div>
 
           <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => {
-                onNewChat()
-                if (isMobile) setOpenMobile(false)
-              }}
-              className="flex items-center justify-center p-1.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors cursor-pointer"
-              title="New Chat / New Analysis"
-            >
-              <SquarePen className="w-4 h-4" />
-            </button>
             <SidebarTrigger className="hover:bg-sidebar-accent rounded-lg p-1.5 transition-colors cursor-pointer text-sidebar-foreground" title="Close Sidebar (Ctrl+B)" />
           </div>
         </div>
@@ -534,7 +530,7 @@ export function UserHistorySidebar({
             <SidebarMenuButton
               onClick={() => {
                 onNewChat()
-                if (isMobile) setOpenMobile(false)
+                dismissSidebar()
               }}
               tooltip="New Chat"
             >
@@ -547,7 +543,7 @@ export function UserHistorySidebar({
             <SidebarMenuButton
               onClick={() => {
                 onNavigateScreen("fusion")
-                if (isMobile) setOpenMobile(false)
+                dismissSidebar()
               }}
               isActive={activeScreen === "fusion"}
               tooltip="Multimodal Satellite Images"
@@ -561,7 +557,7 @@ export function UserHistorySidebar({
             <SidebarMenuButton
               onClick={() => {
                 onNavigateScreen("pipeline")
-                if (isMobile) setOpenMobile(false)
+                dismissSidebar()
               }}
               isActive={activeScreen === "pipeline"}
               tooltip="Agentic Remote Sensing Pipeline"
@@ -575,7 +571,7 @@ export function UserHistorySidebar({
             <SidebarMenuButton
               onClick={() => {
                 onNavigateScreen("model-attach")
-                if (isMobile) setOpenMobile(false)
+                dismissSidebar()
               }}
               isActive={activeScreen === "model-attach"}
               className="text-[0.92rem] py-2 h-9 relative"
@@ -596,7 +592,7 @@ export function UserHistorySidebar({
             <SidebarMenuButton
               onClick={() => {
                 onNavigateScreen("projects")
-                if (isMobile) setOpenMobile(false)
+                dismissSidebar()
               }}
               isActive={activeScreen === "projects"}
               className="text-[0.92rem] py-2 h-9"
@@ -611,7 +607,7 @@ export function UserHistorySidebar({
             <SidebarMenuButton
               onClick={() => {
                 onNavigateScreen("report")
-                if (isMobile) setOpenMobile(false)
+                dismissSidebar()
               }}
               isActive={activeScreen === "report"}
               tooltip="Intelligence Dossier Research"
@@ -656,7 +652,10 @@ export function UserHistorySidebar({
                 Projects
               </SidebarGroupLabel>
               <button 
-                onClick={() => onNavigateScreen("projects")}
+                onClick={() => {
+                  onNavigateScreen("projects");
+                  dismissSidebar();
+                }}
                 className="p-1 rounded hover:bg-sidebar-accent text-sidebar-foreground/70 hover:text-sidebar-foreground transition-colors cursor-pointer"
                 title="Manage or create projects"
               >
@@ -672,7 +671,7 @@ export function UserHistorySidebar({
                       <SidebarMenuButton
                         onClick={() => {
                           onOpenProject ? onOpenProject(p) : onNavigateScreen("projects");
-                          if (isMobile) setOpenMobile(false);
+                          dismissSidebar();
                         }}
                         isActive={isProjActive}
                         className="text-[0.88rem] py-1.5 h-8 gap-2"
@@ -726,7 +725,10 @@ export function UserHistorySidebar({
         <SidebarMenu className="gap-1">
           <SidebarMenuItem>
             <SidebarMenuButton
-              onClick={() => onNavigateScreen("report")}
+              onClick={() => {
+                onNavigateScreen("report");
+                dismissSidebar();
+              }}
               tooltip="SatQuery Enterprise Plans"
             >
               <BadgeDollarSign aria-hidden="true" />
@@ -737,8 +739,8 @@ export function UserHistorySidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => {
-                onOpenSettings()
-                if (isMobile) setOpenMobile(false)
+                onOpenSettings();
+                dismissSidebar();
               }}
               isActive={activeScreen === "settings"}
               tooltip="Settings & Appearance"
@@ -750,7 +752,10 @@ export function UserHistorySidebar({
 
           <SidebarMenuItem>
             <SidebarMenuButton
-              onClick={() => onNavigateScreen("pipeline")}
+              onClick={() => {
+                onNavigateScreen("pipeline");
+                dismissSidebar();
+              }}
               tooltip="Documentation & ISRO Help"
             >
               <CircleHelp aria-hidden="true" />
@@ -824,7 +829,7 @@ export function UserHistorySidebar({
                       icon: <User className="h-[16px] w-[16px] text-[#cbd5e1]" />,
                       onSelect: () => {
                         onOpenProfile?.()
-                        if (isMobile) setOpenMobile(false)
+                        dismissSidebar()
                       }
                     },
                     {
@@ -832,13 +837,16 @@ export function UserHistorySidebar({
                       icon: <Settings className="h-[16px] w-[16px] text-[#cbd5e1]" />,
                       onSelect: () => {
                         onOpenSettings()
-                        if (isMobile) setOpenMobile(false)
+                        dismissSidebar()
                       }
                     },
                     {
                       label: "Upgrade Plan",
                       icon: <Sparkles className="h-[16px] w-[16px] text-blue-400" />,
-                      onSelect: () => onNavigateScreen("report")
+                      onSelect: () => {
+                        onNavigateScreen("report")
+                        dismissSidebar()
+                      }
                     }
                   ].map(({ label, icon, onSelect }) => (
                     <button
