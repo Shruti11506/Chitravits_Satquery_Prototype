@@ -20,6 +20,7 @@ import { GradientBackground } from './components/ui/oceanic-shimmer';
 import { SATELLITE_SCENARIOS } from './data/mockData';
 import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from './components/ui/sidebar';
 import { UserHistorySidebar } from './components/UserHistorySidebar';
+import { InitialLoader } from './components/InitialLoader';
 import { getActiveModel, setActiveModelId } from './lib/modelsStorage';
 import { getActiveProjectId, setActiveProjectId } from './lib/projectsStorage';
 import { getImageryPreviewUrl, getImageryGeo, getPreviewNote, makePairAttachment } from './lib/filePreview';
@@ -321,21 +322,6 @@ export function App() {
     activeProjectRef.current = activeProject;
   }, [activeProject]);
 
-  useEffect(() => {
-    listProjects()
-      .then(setProjects)
-      .catch(err => console.error('[SatQuery] Error loading projects:', err));
-    const activeId = getActiveProjectId();
-    if (activeId) {
-      getProject(activeId)
-        .then(proj => setActiveProject(proj))
-        .catch(err => {
-          console.warn('[SatQuery] Active project load error:', err);
-          setActiveProjectId(null);
-        });
-    }
-  }, []);
-
   const handleSelectModel = (model) => {
     setActiveModel(model);
     setActiveModelId(model ? model.id : null);
@@ -489,15 +475,15 @@ export function App() {
       .catch((err) => console.error('[SatQuery] Could not generate conversation title:', err));
   }, [bumpHistory, openConversation]);
 
+  // Application initial bootstrap loading state
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isExitingLoader, setIsExitingLoader] = useState(false);
+  const [initStepText, setInitStepText] = useState('Initializing SatQuery AI...');
+  const [initError, setInitError] = useState(null);
+
   // The single workspace profile (GET /profile) shown in the sidebar footer.
   // null until loaded, or if the backend can't provide it -- never a made-up user.
   const [profileUser, setProfileUser] = useState(null);
-
-  useEffect(() => {
-    getProfile()
-      .then(({ user }) => setProfileUser(user))
-      .catch((err) => console.error('[SatQuery] Could not load profile:', err));
-  }, []);
 
   useEffect(() => {
     rememberPointer(LAST_SCREEN_KEY, RESTORABLE_SCREENS.includes(activeScreen) ? activeScreen : null);
@@ -529,11 +515,126 @@ export function App() {
       });
   }, [showSettings]);
 
-  useEffect(() => { loadSettings(); }, [loadSettings]);
+  // Centralized Application Initialization Sequence
+  const initApplication = useCallback(async () => {
+    setIsInitializing(true);
+    setIsExitingLoader(false);
+    setInitError(null);
+    console.log('[SatQuery] Initializing application...');
+
+    try {
+      // 1. Settings & Profile
+      setInitStepText('Connecting to SatQuery...');
+      const [settingsRes, profileRes] = await Promise.allSettled([
+        getSettings(),
+        getProfile()
+      ]);
+
+      if (settingsRes.status === 'rejected' && profileRes.status === 'rejected') {
+        const err = settingsRes.reason || profileRes.reason;
+        console.error('[SatQuery] Application initialization failed:', err);
+        setInitError(err?.message || 'Failed to connect to SatQuery backend services.');
+        return;
+      }
+
+      if (settingsRes.status === 'fulfilled' && settingsRes.value) {
+        showSettings(settingsRes.value);
+        console.log('[SatQuery] Settings loaded');
+      } else if (settingsRes.status === 'rejected') {
+        console.warn('[SatQuery] Settings load warning:', settingsRes.reason);
+      }
+
+      if (profileRes.status === 'fulfilled' && profileRes.value?.user) {
+        setProfileUser(profileRes.value.user);
+        console.log('[SatQuery] Profile loaded');
+      } else if (profileRes.status === 'rejected') {
+        console.warn('[SatQuery] Profile load warning:', profileRes.reason);
+      }
+
+      // 2. Projects
+      setInitStepText('Syncing projects workspace...');
+      try {
+        const projList = await listProjects();
+        setProjects(projList);
+        console.log('[SatQuery] Projects loaded');
+        const activeId = getActiveProjectId();
+        if (activeId) {
+          const proj = await getProject(activeId).catch(() => null);
+          if (proj) setActiveProject(proj);
+        }
+      } catch (err) {
+        console.warn('[SatQuery] Projects load warning:', err);
+      }
+
+      // 3. Conversations history
+      setInitStepText('Syncing conversations...');
+      try {
+        await listConversations(100);
+        console.log('[SatQuery] Conversations loaded');
+      } catch (err) {
+        console.warn('[SatQuery] Conversations load warning:', err);
+      }
+
+      // 4. Session workspace restoration if pointers exist
+      setInitStepText('Preparing workspace...');
+      const showRestoredWorkspace = () => {
+        if (initialScreenRef.current !== 'landing') setHistoryStack(['workspace']);
+        else setActiveScreen('workspace');
+      };
+      let lastConversationId;
+      let lastImageryId;
+      try {
+        lastConversationId = localStorage.getItem(LAST_CONVERSATION_KEY);
+        lastImageryId = localStorage.getItem(LAST_IMAGERY_KEY);
+      } catch {}
+
+      if (lastConversationId) {
+        try {
+          const detail = await getConversation(lastConversationId);
+          openConversation(detail);
+          if (isEmptyConversation(detail)) {
+            freshConversationIdRef.current = detail.id;
+          } else {
+            setWorkspaceScenario(buildConversationScenario(detail));
+            showRestoredWorkspace();
+          }
+        } catch (err) {
+          console.error('[SatQuery] Could not restore last conversation:', err);
+          rememberPointer(LAST_CONVERSATION_KEY, null);
+        }
+      } else if (lastImageryId) {
+        try {
+          const [imagery, history] = await Promise.all([
+            getImagery(lastImageryId),
+            getAnalysisHistory(200).catch(() => [])
+          ]);
+          const itemsForImage = history.filter(h => h.imagery_id === lastImageryId);
+          setWorkspaceScenario(buildLegacyScenario(imagery, itemsForImage));
+          showRestoredWorkspace();
+        } catch (err) {
+          console.error('[SatQuery] Could not restore last session:', err);
+          try { localStorage.removeItem(LAST_IMAGERY_KEY); } catch {}
+        }
+      }
+
+      console.log('[SatQuery] Application ready');
+      setIsExitingLoader(true);
+      setTimeout(() => {
+        setIsInitializing(false);
+        setIsExitingLoader(false);
+      }, 300);
+    } catch (err) {
+      console.error('[SatQuery] Initialization error:', err);
+      setInitError(err?.message || 'Failed to initialize application.');
+    }
+  }, [showSettings, openConversation]);
+
+  useEffect(() => {
+    initApplication();
+  }, [initApplication]);
 
   // Optimistic: the change shows at once; the server's answer to the LATEST
-  // save wins, and a failed save puts the previous values back (and rejects,
-  // so the caller can say "Failed to save changes.").
+  // save wins, and a failed save puts the previous values back.
   const saveSettings = useCallback(async (changes) => {
     const previous = settingsRef.current;
     if (!previous) throw new Error('Settings are not loaded.');
@@ -559,95 +660,6 @@ export function App() {
       showSettings({ ...current, profile: { display_name, username, avatar_url, bio } });
     }
   }, [showSettings]);
-
-  useEffect(() => {
-    let media;
-    try {
-      media = window.matchMedia('(prefers-color-scheme: dark)');
-    } catch {
-      return undefined;
-    }
-    const onChange = (event) => setSystemPrefersDark(event.matches);
-    // Also re-check on focus: not every environment fires the media 'change' event.
-    const recheck = () => setSystemPrefersDark(media.matches);
-    media.addEventListener?.('change', onChange);
-    window.addEventListener('focus', recheck);
-    return () => {
-      media.removeEventListener?.('change', onChange);
-      window.removeEventListener('focus', recheck);
-    };
-  }, []);
-
-  // Sync theme with HTML data-theme attribute
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    rememberPointer(THEME_KEY, themePreference);
-  }, [theme, themePreference]);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-sidebar-density', sidebarDensity);
-    rememberPointer(DENSITY_KEY, sidebarDensity);
-  }, [sidebarDensity]);
-
-  // Page-refresh persistence: the backend database is the source of truth,
-  // not localStorage -- this only remembers WHICH imagery to re-fetch, then
-  // always re-fetches it (and its history) fresh from the API.
-  useEffect(() => {
-    // A refresh on the profile/settings screen stays there; the restored chat is one Back away.
-    const showRestoredWorkspace = () => {
-      if (initialScreenRef.current !== 'landing') setHistoryStack(['workspace']);
-      else setActiveScreen('workspace');
-    };
-    let lastConversationId;
-    let lastImageryId;
-    try {
-      lastConversationId = localStorage.getItem(LAST_CONVERSATION_KEY);
-      lastImageryId = localStorage.getItem(LAST_IMAGERY_KEY);
-    } catch {
-      return;
-    }
-
-    if (lastConversationId) {
-      (async () => {
-        try {
-          const detail = await getConversation(lastConversationId);
-          openConversation(detail);
-          if (isEmptyConversation(detail)) {
-            // An empty conversation: stay on the upload screen, and let the
-            // next upload go into this conversation instead of a new one.
-            freshConversationIdRef.current = detail.id;
-            return;
-          }
-          setWorkspaceScenario(buildConversationScenario(detail));
-          showRestoredWorkspace();
-        } catch (err) {
-          console.error('[SatQuery] Could not restore last conversation:', err);
-          rememberPointer(LAST_CONVERSATION_KEY, null);
-        }
-      })();
-      return;
-    }
-    if (!lastImageryId) return;
-
-    (async () => {
-      try {
-        const [imagery, history] = await Promise.all([
-          getImagery(lastImageryId),
-          getAnalysisHistory(200).catch(() => [])
-        ]);
-        const itemsForImage = history.filter(h => h.imagery_id === lastImageryId);
-        setWorkspaceScenario(buildLegacyScenario(imagery, itemsForImage));
-        showRestoredWorkspace();
-      } catch (err) {
-        // Imagery no longer exists (deleted) or backend unreachable -- clear
-        // the stale pointer and fall back to the empty landing state, never
-        // to fake data.
-        console.error('[SatQuery] Could not restore last session:', err);
-        try { localStorage.removeItem(LAST_IMAGERY_KEY); } catch { /* ignore */ }
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally runs once on mount only
-  }, []);
 
   // Header sun/moon: triggers high-speed aerospace theme transition wavefront and updates preferences.
   const toggleTheme = (e) => {
@@ -820,6 +832,16 @@ export function App() {
 
   return (
     <SidebarProvider defaultOpen={true}>
+      {/* SatQuery Satellite Intelligence Initial Workspace Loader */}
+      {isInitializing && (
+        <InitialLoader
+          stepText={initStepText}
+          error={initError}
+          onRetry={initApplication}
+          isExiting={isExitingLoader}
+        />
+      )}
+
       {/* High-Tech Aerospace Theme Transition Wavefront */}
       <ThemeTransitionWave wave={themeWave} />
 
