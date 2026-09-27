@@ -21,7 +21,7 @@ import { SATELLITE_SCENARIOS } from './data/mockData';
 import { SidebarProvider, SidebarTrigger, SidebarInset } from './components/ui/sidebar';
 import { UserHistorySidebar } from './components/UserHistorySidebar';
 import { getActiveModel, setActiveModelId } from './lib/modelsStorage';
-import { getActiveProject, getStoredProjects, setActiveProjectId, addChatToProject } from './lib/projectsStorage';
+import { getActiveProjectId, setActiveProjectId } from './lib/projectsStorage';
 import { getImageryPreviewUrl, getImageryGeo, getPreviewNote, makePairAttachment } from './lib/filePreview';
 import {
   getImagery,
@@ -33,7 +33,9 @@ import {
   getProfile,
   getSettings,
   updateSettings,
-  applySettingsChanges
+  applySettingsChanges,
+  getProject,
+  listProjects
 } from './lib/apiClient';
 
 // Legacy pointer: chats created before conversations existed are keyed by imagery.
@@ -232,8 +234,28 @@ export function App() {
   // Attached Custom AI Model state (Folder Drag & Drop)
   const [activeModel, setActiveModel] = useState(() => getActiveModel());
   // ChatGPT-Style Projects state
-  const [projects, setProjects] = useState(() => getStoredProjects());
-  const [activeProject, setActiveProject] = useState(() => getActiveProject());
+  const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(null);
+  const activeProjectRef = useRef(null);
+
+  useEffect(() => {
+    activeProjectRef.current = activeProject;
+  }, [activeProject]);
+
+  useEffect(() => {
+    listProjects()
+      .then(setProjects)
+      .catch(err => console.error('[SatQuery] Error loading projects:', err));
+    const activeId = getActiveProjectId();
+    if (activeId) {
+      getProject(activeId)
+        .then(proj => setActiveProject(proj))
+        .catch(err => {
+          console.warn('[SatQuery] Active project load error:', err);
+          setActiveProjectId(null);
+        });
+    }
+  }, []);
 
   const handleSelectModel = (model) => {
     setActiveModel(model);
@@ -323,7 +345,8 @@ export function App() {
   const ensureConversation = useCallback(async () => {
     if (activeConversationRef.current) return activeConversationRef.current.id;
     if (!pendingConversationRef.current) {
-      const pending = createConversation().then((conversation) => {
+      const projId = activeProjectRef.current?.id || null;
+      const pending = createConversation(projId ? { project_id: projId } : null).then((conversation) => {
         // Not opened if New Chat was clicked meanwhile -- the upload still
         // goes into it, but the user has moved on to a new chat.
         if (pendingConversationRef.current === pending) openConversation(conversation);
@@ -375,10 +398,6 @@ export function App() {
   const handleQuerySubmitted = useCallback((conversationId) => {
     bumpHistory();
     if (!conversationId) return;
-    if (activeProject) {
-      addChatToProject(activeProject.id, conversationId);
-      setProjects(getStoredProjects());
-    }
     const current = activeConversationRef.current;
     if (current?.id === conversationId && current.title_source !== 'default') return;
     generateConversationTitle(conversationId)

@@ -75,6 +75,48 @@ def validate_upload(filename: str, content_type: str | None, size: int) -> str:
     return resolved_content_type
 
 
+PROJECTS_PREFIX = "projects"
+
+# Project knowledge files: AOI vectors, reference rasters, briefs, tables --
+# what the Projects "Knowledge Files" tab invites, and nothing executable.
+PROJECT_FILE_CONTENT_TYPES = {
+    ".geojson": "application/geo+json",
+    ".json": "application/json",
+    ".kml": "application/vnd.google-earth.kml+xml",
+    ".kmz": "application/vnd.google-earth.kmz",
+    ".gpkg": "application/geopackage+sqlite3",
+    ".shp": "application/octet-stream",
+    ".shx": "application/octet-stream",
+    ".dbf": "application/octet-stream",
+    ".prj": "text/plain",
+    ".zip": "application/zip",
+    ".pdf": "application/pdf",
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    **CONTENT_TYPE_BY_EXTENSION,  # images and TIFF/GeoTIFF rasters
+}
+
+
+def validate_project_file(filename: str, size: int) -> str:
+    """Validate a project knowledge file; returns its content type or raises."""
+    if not filename or not filename.strip():
+        raise ValidationAppError("MISSING_FILENAME", "The uploaded file must have a filename.")
+    content_type = PROJECT_FILE_CONTENT_TYPES.get(get_extension(filename))
+    if content_type is None:
+        raise ValidationAppError(
+            "UNSUPPORTED_FILE_TYPE",
+            "Supported project files: GeoJSON, KML/KMZ, GeoPackage, shapefile parts or ZIP, "
+            "PDF, CSV, TXT/MD, TIFF/GeoTIFF, PNG, JPEG and WEBP.",
+        )
+    settings = get_settings()
+    if size <= 0:
+        raise ValidationAppError("EMPTY_FILE", "The uploaded file is empty.")
+    if size > settings.max_upload_size_bytes:
+        raise ValidationAppError("FILE_TOO_LARGE", f"File exceeds the {settings.MAX_UPLOAD_SIZE_MB} MB upload limit.")
+    return content_type
+
+
 def build_storage_path(filename: str, prefix: str = IMAGERY_PREFIX) -> str:
     unique_id = str(uuid.uuid4())
     safe_filename = filename.strip().replace("/", "_")

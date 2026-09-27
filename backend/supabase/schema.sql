@@ -122,7 +122,9 @@ create index if not exists idx_audit_logs_job_id on audit_logs(job_id);
 
 -- Profile page (profiles table, profile_dashboard() aggregation, RLS): run
 -- migrations/0004_profile_analytics.sql after this file -- it is additive and
--- re-runnable, so it is not duplicated here.
+-- re-runnable, so it is not duplicated here. The same goes for
+-- 0005_user_settings.sql and 0008_projects.sql (projects, project_files,
+-- conversations.project_id), which both reference `profiles`.
 
 -- Storage bucket used by the backend (see app/services/storage_service.py).
 -- Uncomment and run if you manage storage via SQL instead of the Supabase

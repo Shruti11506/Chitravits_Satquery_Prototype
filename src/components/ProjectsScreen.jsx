@@ -6,10 +6,15 @@ import {
   HardDrive, FileUp, X, FolderTree, Layers, ChevronRight
 } from 'lucide-react';
 import { 
-  getStoredProjects, saveStoredProjects, getActiveProjectId, 
-  setActiveProjectId, createProject, updateProject, deleteProject,
-  addKnowledgeFileToProject, removeKnowledgeFileFromProject 
-} from '../lib/projectsStorage';
+  listProjects,
+  getProject,
+  createProject as apiCreateProject,
+  updateProject as apiUpdateProject,
+  deleteProject as apiDeleteProject,
+  uploadProjectFile,
+  deleteProjectFile
+} from '../lib/apiClient';
+import { getActiveProjectId, setActiveProjectId } from '../lib/projectsStorage';
 
 const EMOJI_OPTIONS = ['📁', '🚨', '🏙️', '🌊', '🌾', '🛰️', '🌋', '🚢', '🗺️', '🌲'];
 const COLOR_OPTIONS = ['#3b82f6', '#ef4444', '#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#ec4899'];
@@ -33,11 +38,20 @@ const INSTRUCTION_PRESETS = [
   }
 ];
 
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversation }) {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'instructions' | 'files'
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -52,14 +66,34 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
   // File Upload State inside Project
   const [isUploadingFile, setIsUploadingFile] = useState(false);
 
-  useEffect(() => {
-    const loaded = getStoredProjects();
-    setProjects(loaded);
-    const activeId = getActiveProjectId();
-    if (activeId) {
-      const found = loaded.find(p => p.id === activeId);
-      if (found) setActiveProject(found);
+  const loadProjectsData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const apiProjects = await listProjects();
+      setProjects(apiProjects);
+      const activeId = getActiveProjectId();
+      if (activeId) {
+        try {
+          const detail = await getProject(activeId);
+          setActiveProject(detail);
+        } catch (err) {
+          console.warn('[SatQuery] Could not load active project detail:', err);
+          setActiveProjectId(null);
+          setActiveProject(null);
+        }
+      }
+    } catch (err) {
+      console.error('[SatQuery] Error loading projects from backend:', err);
+      setLoadError(err?.message || 'Unable to connect to projects service.');
+      setProjects([]);
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadProjectsData();
   }, []);
 
   const showToast = (msg) => {
@@ -67,15 +101,25 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const handleOpenProject = (proj) => {
-    setActiveProject(proj);
+  const handleOpenProject = async (proj) => {
     setActiveProjectId(proj.id);
     setActiveTab('chats');
+    try {
+      const detail = await getProject(proj.id);
+      setActiveProject(detail);
+    } catch (err) {
+      console.error('[SatQuery] Error opening project detail:', err);
+      showToast('Failed to load project details from backend.');
+    }
   };
 
   const handleBackToAllProjects = () => {
     setActiveProject(null);
     setActiveProjectId(null);
+    // Refresh project list counts from backend
+    listProjects()
+      .then(setProjects)
+      .catch(err => console.error('[SatQuery] Refresh error:', err));
   };
 
   const handleOpenCreateModal = () => {
@@ -91,104 +135,123 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
   const handleOpenEditModal = (proj, e) => {
     e?.stopPropagation();
     setEditingProject(proj);
-    setProjectName(proj.name);
+    setProjectName(proj.name || '');
     setProjectDesc(proj.description || '');
     setProjectIcon(proj.icon || '📁');
     setProjectColor(proj.color || '#3b82f6');
-    setProjectInstructions(proj.customInstructions || '');
+    setProjectInstructions(proj.custom_instructions || proj.customInstructions || '');
     setIsModalOpen(true);
   };
 
-  const handleSaveModal = (e) => {
+  const handleSaveModal = async (e) => {
     e.preventDefault();
     if (!projectName.trim()) return;
 
-    if (editingProject) {
-      const updated = updateProject(editingProject.id, {
-        name: projectName.trim(),
-        description: projectDesc.trim(),
-        icon: projectIcon,
-        color: projectColor,
-        customInstructions: projectInstructions.trim()
-      });
-      const all = getStoredProjects();
-      setProjects(all);
-      if (activeProject?.id === editingProject.id) {
-        setActiveProject(updated);
+    try {
+      if (editingProject) {
+        const updated = await apiUpdateProject(editingProject.id, {
+          name: projectName.trim(),
+          description: projectDesc.trim() || null,
+          icon: projectIcon,
+          color: projectColor,
+          custom_instructions: projectInstructions.trim() || null
+        });
+        const apiProjects = await listProjects();
+        setProjects(apiProjects);
+        if (activeProject?.id === editingProject.id) {
+          const detail = await getProject(editingProject.id);
+          setActiveProject(detail);
+        }
+        showToast(`Project "${projectName}" updated successfully.`);
+      } else {
+        const created = await apiCreateProject({
+          name: projectName.trim(),
+          description: projectDesc.trim() || null,
+          icon: projectIcon,
+          color: projectColor,
+          custom_instructions: projectInstructions.trim() || null
+        });
+        const apiProjects = await listProjects();
+        setProjects(apiProjects);
+        setActiveProjectId(created.id);
+        const detail = await getProject(created.id);
+        setActiveProject(detail);
+        showToast(`New Project "${projectName}" created!`);
       }
-      showToast(`Project "${projectName}" updated successfully.`);
-    } else {
-      const created = createProject({
-        name: projectName.trim(),
-        description: projectDesc.trim(),
-        icon: projectIcon,
-        color: projectColor,
-        customInstructions: projectInstructions.trim(),
-        knowledgeFiles: [],
-        conversationIds: []
-      });
-      const all = getStoredProjects();
-      setProjects(all);
-      setActiveProject(created);
-      setActiveProjectId(created.id);
-      showToast(`New Project "${projectName}" created!`);
+      setIsModalOpen(false);
+    } catch (err) {
+      console.error('[SatQuery] Save project error:', err);
+      showToast(err?.message || 'Failed to save project.');
     }
-
-    setIsModalOpen(false);
   };
 
-  const handleDeleteProject = (projId, e) => {
+  const handleDeleteProject = async (projId, e) => {
     e?.stopPropagation();
-    const updated = deleteProject(projId);
-    setProjects(updated);
-    if (activeProject?.id === projId) {
-      setActiveProject(null);
+    try {
+      await apiDeleteProject(projId);
+      const apiProjects = await listProjects();
+      setProjects(apiProjects);
+      if (activeProject?.id === projId) {
+        setActiveProject(null);
+        setActiveProjectId(null);
+      }
+      showToast('Project deleted.');
+    } catch (err) {
+      console.error('[SatQuery] Delete project error:', err);
+      showToast(err?.message || 'Failed to delete project.');
     }
-    showToast('Project deleted.');
   };
 
-  const handleSaveInstructions = () => {
+  const handleSaveInstructions = async () => {
     if (!activeProject) return;
-    const updated = updateProject(activeProject.id, {
-      customInstructions: projectInstructions
-    });
-    setActiveProject(updated);
-    setProjects(getStoredProjects());
-    showToast('Project custom instructions saved.');
+    try {
+      await apiUpdateProject(activeProject.id, {
+        custom_instructions: projectInstructions.trim() || null
+      });
+      const detail = await getProject(activeProject.id);
+      setActiveProject(detail);
+      const apiProjects = await listProjects();
+      setProjects(apiProjects);
+      showToast('Project custom instructions saved.');
+    } catch (err) {
+      console.error('[SatQuery] Save instructions error:', err);
+      showToast(err?.message || 'Failed to save instructions.');
+    }
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     if (!activeProject || !e.target.files || !e.target.files[0]) return;
     const file = e.target.files[0];
-    const sizeMb = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
-    let type = 'document';
-    if (file.name.endsWith('.geojson') || file.name.endsWith('.shp')) type = 'vector';
-    if (file.name.endsWith('.tif') || file.name.endsWith('.tiff')) type = 'raster';
-
     setIsUploadingFile(true);
-    setTimeout(() => {
-      addKnowledgeFileToProject(activeProject.id, {
-        name: file.name,
-        size: sizeMb,
-        type
-      });
-      const all = getStoredProjects();
-      setProjects(all);
-      const refreshed = all.find(p => p.id === activeProject.id);
-      setActiveProject(refreshed);
-      setIsUploadingFile(false);
+
+    try {
+      await uploadProjectFile(activeProject.id, file);
+      const detail = await getProject(activeProject.id);
+      setActiveProject(detail);
+      const apiProjects = await listProjects();
+      setProjects(apiProjects);
       showToast(`File "${file.name}" added to project knowledge base.`);
-    }, 400);
+    } catch (err) {
+      console.error('[SatQuery] Upload project file error:', err);
+      showToast(err?.message || 'Failed to upload knowledge file.');
+    } finally {
+      setIsUploadingFile(false);
+    }
   };
 
-  const handleRemoveFile = (fileId) => {
+  const handleRemoveFile = async (fileId) => {
     if (!activeProject) return;
-    removeKnowledgeFileFromProject(activeProject.id, fileId);
-    const all = getStoredProjects();
-    setProjects(all);
-    const refreshed = all.find(p => p.id === activeProject.id);
-    setActiveProject(refreshed);
-    showToast('Knowledge file removed.');
+    try {
+      await deleteProjectFile(activeProject.id, fileId);
+      const detail = await getProject(activeProject.id);
+      setActiveProject(detail);
+      const apiProjects = await listProjects();
+      setProjects(apiProjects);
+      showToast('Knowledge file removed.');
+    } catch (err) {
+      console.error('[SatQuery] Remove project file error:', err);
+      showToast(err?.message || 'Failed to remove file.');
+    }
   };
 
   const filteredProjects = projects.filter(p => 
@@ -281,6 +344,14 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
             />
           </div>
 
+          {/* Error Message if Backend unreachable */}
+          {loadError && (
+            <div className="p-3 mb-4 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center justify-between">
+              <span>{loadError}</span>
+              <button onClick={loadProjectsData} className="btn btn-xs btn-secondary">Retry</button>
+            </div>
+          )}
+
           {/* Grid of Projects */}
           <div className="projects-grid">
             {filteredProjects.map((proj) => (
@@ -321,13 +392,13 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                 <div className="project-meta-badges">
                   <span className="meta-badge">
                     <MessageSquare size={12} />
-                    <span>{proj.conversationIds?.length || 0} Chats</span>
+                    <span>{proj.chat_count ?? proj.conversations?.length ?? 0} Chats</span>
                   </span>
                   <span className="meta-badge">
                     <FileText size={12} />
-                    <span>{proj.knowledgeFiles?.length || 0} Files</span>
+                    <span>{proj.file_count ?? proj.files?.length ?? 0} Files</span>
                   </span>
-                  {proj.customInstructions && (
+                  {(proj.has_custom_instructions || Boolean((proj.custom_instructions || '').trim())) && (
                     <span className="meta-badge badge-has-instructions" title="Has custom instructions configured">
                       <Sparkles size={11} />
                       <span>Custom Prompt</span>
@@ -337,7 +408,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
 
                 <div className="card-footer">
                   <span className="updated-text">
-                    Updated {proj.updatedAt ? new Date(proj.updatedAt).toLocaleDateString() : 'recently'}
+                    Updated {proj.updated_at ? new Date(proj.updated_at).toLocaleDateString() : 'recently'}
                   </span>
                   <div className="open-arrow">
                     <ChevronRight size={16} />
@@ -375,19 +446,19 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
               className={`project-tab-btn ${activeTab === 'chats' ? 'active' : ''}`}
             >
               <MessageSquare size={15} />
-              <span>Project Chats ({activeProject.conversationIds?.length || 0})</span>
+              <span>Project Chats ({activeProject.conversations?.length ?? activeProject.chat_count ?? 0})</span>
             </button>
 
             <button 
               onClick={() => {
                 setActiveTab('instructions');
-                setProjectInstructions(activeProject.customInstructions || '');
+                setProjectInstructions(activeProject.custom_instructions || activeProject.customInstructions || '');
               }}
               className={`project-tab-btn ${activeTab === 'instructions' ? 'active' : ''}`}
             >
               <Sparkles size={15} />
               <span>Custom Instructions</span>
-              {activeProject.customInstructions && (
+              {(activeProject.has_custom_instructions || Boolean((activeProject.custom_instructions || '').trim())) && (
                 <span className="tab-dot-active"></span>
               )}
             </button>
@@ -397,7 +468,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
               className={`project-tab-btn ${activeTab === 'files' ? 'active' : ''}`}
             >
               <HardDrive size={15} />
-              <span>Project Knowledge Files ({activeProject.knowledgeFiles?.length || 0})</span>
+              <span>Project Knowledge Files ({activeProject.files?.length ?? activeProject.file_count ?? 0})</span>
             </button>
           </div>
 
@@ -418,12 +489,12 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                 </button>
               </div>
 
-              {activeProject.conversationIds && activeProject.conversationIds.length > 0 ? (
+              {activeProject.conversations && activeProject.conversations.length > 0 ? (
                 <div className="project-chats-list">
-                  {activeProject.conversationIds.map((cId, idx) => (
+                  {activeProject.conversations.map((chat, idx) => (
                     <div 
-                      key={cId}
-                      onClick={() => onOpenConversation?.({ id: cId, title: `Project Chat #${idx + 1}` })}
+                      key={chat.id}
+                      onClick={() => onOpenConversation?.({ id: chat.id, title: chat.title, title_source: chat.title_source })}
                       className="project-chat-row"
                     >
                       <div className="flex items-center gap-3">
@@ -431,7 +502,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                           <MessageSquare size={16} className="text-blue-400" />
                         </div>
                         <div>
-                          <h4 className="chat-row-title">Conversation #{cId.slice(0, 8)}</h4>
+                          <h4 className="chat-row-title">{chat.title || `Conversation #${chat.id.slice(0, 8)}`}</h4>
                           <span className="chat-row-meta">Tied to {activeProject.name}</span>
                         </div>
                       </div>
@@ -526,18 +597,19 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                 </div>
                 <label className="btn btn-primary cursor-pointer">
                   <FileUp size={15} />
-                  <span>Upload Knowledge File</span>
+                  <span>{isUploadingFile ? 'Uploading...' : 'Upload Knowledge File'}</span>
                   <input 
                     type="file" 
                     onChange={handleFileUpload}
+                    disabled={isUploadingFile}
                     style={{ display: 'none' }}
                   />
                 </label>
               </div>
 
-              {activeProject.knowledgeFiles && activeProject.knowledgeFiles.length > 0 ? (
+              {activeProject.files && activeProject.files.length > 0 ? (
                 <div className="knowledge-files-grid">
-                  {activeProject.knowledgeFiles.map((file) => (
+                  {activeProject.files.map((file) => (
                     <div key={file.id} className="knowledge-file-card">
                       <div className="flex items-center gap-3">
                         <div className="file-icon-box">
@@ -545,7 +617,9 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                         </div>
                         <div>
                           <h4 className="file-title">{file.name}</h4>
-                          <span className="file-meta">{file.size} • {file.type} • {file.date}</span>
+                          <span className="file-meta">
+                            {formatFileSize(file.file_size)} • {file.mime_type || 'document'} • {file.created_at ? new Date(file.created_at).toLocaleDateString() : ''}
+                          </span>
                         </div>
                       </div>
 
@@ -574,6 +648,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                     <input 
                       type="file" 
                       onChange={handleFileUpload}
+                      disabled={isUploadingFile}
                       style={{ display: 'none' }}
                     />
                   </label>

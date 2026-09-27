@@ -26,7 +26,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def create_conversation() -> dict:
+def create_conversation(project_id: str | None = None) -> dict:
+    """A new "New Chat"; inside a project when project_id is given (it must be the caller's)."""
+    # Imported here: project_service imports this module for ids_with_content.
+    from app.services import project_service
+
+    if project_id:
+        project_service.get_owned_project(project_id)  # 404 PROJECT_NOT_FOUND before any write
+
     client = get_supabase()
     now = _now()
     row = {
@@ -35,6 +42,8 @@ def create_conversation() -> dict:
         "created_at": now,
         "updated_at": now,
     }
+    if project_id:
+        row["project_id"] = project_id  # only then, so ordinary chats never need migration 0008
     try:
         response = client.table(TABLE).insert(row).execute()
     except Exception as exc:  # noqa: BLE001
@@ -43,10 +52,12 @@ def create_conversation() -> dict:
 
     if not response.data:
         raise SupabaseError("Conversation insert returned no data.")
+    if project_id:
+        project_service.touch(project_id)
     return response.data[0]
 
 
-def _ids_with_content(conversation_ids: list[str]) -> set[str]:
+def ids_with_content(conversation_ids: list[str]) -> set[str]:
     """The subset of `conversation_ids` that has at least one upload or query."""
     if not conversation_ids:
         return set()
@@ -84,7 +95,7 @@ def list_conversations(limit: int = 100) -> list[dict]:
         logger.exception("Supabase list failed for conversations")
         raise SupabaseError("Failed to list conversations.") from exc
     rows = response.data or []
-    started = _ids_with_content([row["id"] for row in rows])
+    started = ids_with_content([row["id"] for row in rows])
     return [row for row in rows if row["id"] in started]
 
 
@@ -109,14 +120,14 @@ def purge_empty_conversations(older_than_minutes: int = 60, apply: bool = False)
         row for row in rows
         if datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")).timestamp() < cutoff
     ]
-    started = _ids_with_content([row["id"] for row in old])
+    started = ids_with_content([row["id"] for row in old])
     empty = [row for row in old if row["id"] not in started]
     if not apply:
         return empty
 
     purged = []
     for row in empty:
-        if _ids_with_content([row["id"]]):
+        if ids_with_content([row["id"]]):
             continue
         try:
             client.table(TABLE).delete().eq("id", row["id"]).execute()

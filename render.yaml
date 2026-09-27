@@ -1,0 +1,39 @@
+# Render Blueprint for the SatQuery API (free plan).
+# Render dashboard -> New -> Blueprint -> pick the sat_ GitHub repo.
+# Secrets marked sync:false are typed in once in the dashboard, never committed.
+services:
+  - type: web
+    name: satquery-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: SUPABASE_STORAGE_BUCKET
+        value: Satquery
+      - key: MAX_UPLOAD_SIZE_MB
+        value: "50"
+      - key: RUN_WORKER_IN_API        # free plan has no background workers: run the job worker inside the API process
+        value: "1"
+      - key: MODEL_SERVICE_TIMEOUT_S
+        value: "600"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: CORS_ORIGINS              # e.g. https://satquery.vercel.app
+        sync: false
+      - key: EARTHMIND_SERVICE_URL     # Modal URL from `modal deploy`
+        sync: false
+      - key: MCD_MAMBA_SERVICE_URL
+        sync: false
+      - key: SERVING_API_KEY           # same value as the Modal secret
+        sync: false

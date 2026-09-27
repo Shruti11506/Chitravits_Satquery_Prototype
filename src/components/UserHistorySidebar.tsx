@@ -5,18 +5,14 @@ import { createPortal } from "react-dom"
 import {
   SquarePen,
   Image as ImageIcon,
-  Puzzle,
   Compass,
   Cpu,
   FolderKanban,
   Plus,
   GitCompare,
   BarChart3,
-  Telescope,
   Sparkles,
-  BadgeDollarSign,
   Settings,
-  CircleHelp,
   Satellite,
   Waves,
   FileBarChart,
@@ -560,20 +556,6 @@ export function UserHistorySidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => {
-                onNavigateScreen("pipeline")
-                if (isMobile) setOpenMobile(false)
-              }}
-              isActive={activeScreen === "pipeline"}
-              tooltip="Agentic Remote Sensing Pipeline"
-            >
-              <Puzzle aria-hidden="true" />
-              <span>Plugins</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => {
                 onNavigateScreen("model-attach")
                 if (isMobile) setOpenMobile(false)
               }}
@@ -604,20 +586,6 @@ export function UserHistorySidebar({
             >
               <FolderKanban className="w-4 h-4 text-sidebar-foreground" />
               <span>Projects</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => {
-                onNavigateScreen("report")
-                if (isMobile) setOpenMobile(false)
-              }}
-              isActive={activeScreen === "report"}
-              tooltip="Intelligence Dossier Research"
-            >
-              <Telescope aria-hidden="true" />
-              <span>Deep research</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -721,50 +689,16 @@ export function UserHistorySidebar({
         })}
       </SidebarContent>
 
-      {/* Footer: ChatGPT-Style Settings, Plans, Help, and User Profile */}
+      {/* Footer: User Profile */}
       <SidebarFooter className="p-3 border-t border-sidebar-border/60">
         <SidebarMenu className="gap-1">
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => onNavigateScreen("report")}
-              tooltip="SatQuery Enterprise Plans"
-            >
-              <BadgeDollarSign aria-hidden="true" />
-              <span>See plans and pricing</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => {
-                onOpenSettings()
-                if (isMobile) setOpenMobile(false)
-              }}
-              isActive={activeScreen === "settings"}
-              tooltip="Settings & Appearance"
-            >
-              <Settings aria-hidden="true" />
-              <span>Settings & Appearance</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => onNavigateScreen("pipeline")}
-              tooltip="Documentation & ISRO Help"
-            >
-              <CircleHelp aria-hidden="true" />
-              <span>Help & Mission Guide</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-
           {/* User Profile Tile + its menu, which opens upward from it (anchored,
               not portaled): it stays inside the sidebar at any width/height.
               Spacing uses inline px / arbitrary px sizes on purpose: the global
               `* { margin: 0; padding: 0 }` reset in index.css is unlayered, so
               it overrides Tailwind's padding/margin utilities (p-*, m-*), and
               rem sizes follow a 15px root. */}
-          <SidebarMenuItem className="mt-2 pt-2 border-t border-sidebar-border/40">
+          <SidebarMenuItem>
             <div className="relative">
               <SidebarMenuButton
                 ref={profileTriggerRef}

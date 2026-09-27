@@ -311,8 +311,12 @@ export interface ConversationDetail extends Conversation {
   jobs: ConversationJob[];
 }
 
-export function createConversation() {
-  return request<Conversation>("/conversations", { method: "POST" });
+export function createConversation(meta?: { project_id?: string | null } | string | null) {
+  const projectId = typeof meta === "string" ? meta : meta?.project_id;
+  return request<Conversation>("/conversations", {
+    method: "POST",
+    ...(projectId ? { body: JSON.stringify({ project_id: projectId }) } : {}),
+  });
 }
 
 /** Most recently active first -- the sidebar's data source. */
@@ -565,3 +569,103 @@ export function applySettingsChanges(settings: UserSettings, changes: SettingsCh
   });
   return next;
 }
+
+// ---- Projects -----------------------------------------------------------------
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  custom_instructions: string | null;
+  has_custom_instructions: boolean;
+  chat_count: number;
+  file_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ProjectFile {
+  id: string;
+  project_id: string;
+  name: string;
+  mime_type: string | null;
+  file_size: number | null;
+  created_at: string | null;
+  url?: string | null;
+}
+
+export interface ProjectChatUpload {
+  imagery_id: string;
+  conversation_id: string;
+  conversation_title?: string | null;
+  name: string;
+  file_size?: number | null;
+  created_at?: string | null;
+}
+
+export interface ProjectDetail extends Project {
+  conversations: Conversation[];
+  files: ProjectFile[];
+  chat_uploads: ProjectChatUpload[];
+}
+
+export function listProjects() {
+  return request<Project[]>("/projects");
+}
+
+export function getProject(projectId: string) {
+  return request<ProjectDetail>(`/projects/${projectId}`);
+}
+
+export function createProject(payload: {
+  name: string;
+  description?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  custom_instructions?: string | null;
+}) {
+  return request<Project>("/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateProject(
+  projectId: string,
+  payload: {
+    name?: string | null;
+    description?: string | null;
+    icon?: string | null;
+    color?: string | null;
+    custom_instructions?: string | null;
+  }
+) {
+  return request<Project>(`/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProject(projectId: string) {
+  return request<{ id: string; status: string }>(`/projects/${projectId}`, {
+    method: "DELETE",
+  });
+}
+
+export function uploadProjectFile(projectId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return request<ProjectFile>(`/projects/${projectId}/files`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function deleteProjectFile(projectId: string, fileId: string) {
+  return request<{ id: string; status: string }>(`/projects/${projectId}/files/${fileId}`, {
+    method: "DELETE",
+  });
+}
+

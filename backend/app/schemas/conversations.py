@@ -26,8 +26,16 @@ class ConversationOut(BaseModel):
     id: UUID
     title: str
     title_source: TitleSource
+    # The project this chat belongs to (migration 0008); null for ordinary chats.
+    project_id: UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class ConversationCreate(BaseModel):
+    """Optional body of POST /conversations: start the chat inside a project."""
+
+    project_id: UUID | None = None
 
 
 class ConversationRename(BaseModel):

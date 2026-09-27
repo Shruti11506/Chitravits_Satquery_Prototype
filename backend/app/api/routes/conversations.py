@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query, status
 
 from app.schemas.common import ApiResponse
 from app.schemas.conversations import (
+    ConversationCreate,
     ConversationDeleteResponse,
     ConversationDetail,
     ConversationOut,
@@ -24,8 +25,9 @@ router = APIRouter(prefix="/conversations", tags=["Conversations"])
     status_code=status.HTTP_201_CREATED,
     summary='Create a conversation titled "New Chat"',
 )
-def create_conversation() -> ApiResponse[ConversationOut]:
-    return ApiResponse.ok(ConversationOut(**conversation_service.create_conversation()))
+def create_conversation(payload: ConversationCreate | None = None) -> ApiResponse[ConversationOut]:
+    project_id = str(payload.project_id) if payload and payload.project_id else None
+    return ApiResponse.ok(ConversationOut(**conversation_service.create_conversation(project_id)))
 
 
 @router.get(
