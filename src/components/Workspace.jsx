@@ -6,7 +6,18 @@ import {
   FolderKanban
 } from 'lucide-react';
 import { ImageViewer } from './ImageViewer';
-import { uploadImagery, submitAnalysis } from '../lib/apiClient';
+import { 
+  uploadImagery, 
+  submitAnalysis, 
+  formatChangeDetectionError, 
+  validateChangeDetection, 
+  CHANGE_DETECTION_ERROR_CODES 
+} from '../lib/apiClient';
+import { 
+  isChangeDetectionIntent, 
+  buildModalStateFromValidation, 
+  buildModalStateFromError 
+} from '../lib/changeDetectionValidation';
 import { runModelInference } from '../lib/modelsStorage';
 import { getFilePreviewUrl, getImageryGeo, getPreviewNote, hasRealPreview, fileExtensionLabel } from '../lib/filePreview';
 
@@ -28,6 +39,7 @@ export function Workspace({
   onAnalysisSubmitted, 
   onEnsureConversation, 
   onImageryUploaded,
+  onShowValidationModal,
   activeModel,
   activeProject
 }) {
@@ -97,12 +109,60 @@ export function Workspace({
   // Sends the query to the real backend (POST /api/v1/analysis) and stores
   // an analysis_jobs row -- no AI model runs, so the response is a neutral
   // "queued" acknowledgment, never a fabricated analysis result.
-  const handleSendMessage = (textToSend) => {
+  const handleSendMessage = async (textToSend) => {
     const query = (textToSend !== undefined ? textToSend : inputText).trim();
     if (!query && !pendingAttachment) return;
     if (pendingAttachment?.uploading) return;
 
     const attachmentPayload = pendingAttachment;
+
+    // A newly attached (and successfully uploaded) image becomes the chat's
+    // active image; otherwise the query targets the current one.
+    const imageryIdForAnalysis = attachmentPayload ? attachmentPayload.imageryId || null : backendImageryId;
+    const comparisonIdForAnalysis = attachmentPayload ? null : backendComparisonImageryId;
+
+    // HARD GATE: Check if query expresses change detection intent (e.g. "change detection", "compare these both")
+    if (query && isChangeDetectionIntent(query)) {
+      if (!comparisonIdForAnalysis) {
+        onShowValidationModal?.({
+          open: true,
+          title: "Invalid Input",
+          message: "Change detection requires two compatible satellite images (T1 baseline and T2 target).",
+          errorCode: "IMAGE_COUNT_MISMATCH",
+          details: {
+            t1: attachmentPayload?.name || scenario.uploadedFile?.images?.[0]?.name || scenario.uploadedFile?.name || "Image 1 (Active)",
+            t2: "Missing (Please attach or upload a comparison image)"
+          },
+          resolution: "Upload or attach a second image to perform bi-temporal change comparison."
+        });
+        return; // HARD STOP: Do NOT queue, do NOT add user message, do NOT run model
+      }
+
+      // We have both images -- validate them via backend first!
+      setIsTyping(true);
+      try {
+        const validation = await validateChangeDetection(imageryIdForAnalysis, comparisonIdForAnalysis);
+        if (!validation.valid) {
+          setIsTyping(false);
+          onShowValidationModal?.(buildModalStateFromValidation(validation, {
+            t1Name: scenario.uploadedFile?.images?.[0]?.name,
+            t2Name: scenario.uploadedFile?.images?.[1]?.name
+          }));
+          return; // HARD STOP: Invalid pair must never be queued or accepted
+        }
+      } catch (err) {
+        setIsTyping(false);
+        const errCode = err?.code || err?.detail?.code || err?.detail?.error_code;
+        if (CHANGE_DETECTION_ERROR_CODES.has(errCode)) {
+          onShowValidationModal?.(buildModalStateFromError(err, {
+            t1Name: scenario.uploadedFile?.images?.[0]?.name,
+            t2Name: scenario.uploadedFile?.images?.[1]?.name
+          }));
+          return; // HARD STOP
+        }
+      }
+      setIsTyping(false);
+    }
 
     const userMsg = {
       id: `usr-${Date.now()}`,
@@ -121,10 +181,6 @@ export function Workspace({
     setInputText('');
     setPendingAttachment(null);
 
-    // A newly attached (and successfully uploaded) image becomes the chat's
-    // active image; otherwise the query targets the current one.
-    const imageryIdForAnalysis = attachmentPayload ? attachmentPayload.imageryId || null : backendImageryId;
-    const comparisonIdForAnalysis = attachmentPayload ? null : backendComparisonImageryId;
     if (attachmentPayload?.imageryId) {
       setBackendImageryId(attachmentPayload.imageryId);
       setBackendComparisonImageryId(null); // a newly attached single image replaces a pair
@@ -217,11 +273,23 @@ export function Workspace({
           onAnalysisSubmitted?.(conversationForQuery);
         })
         .catch((err) => {
+          const errCode = err?.code || err?.detail?.code || err?.detail?.error_code;
+          if (CHANGE_DETECTION_ERROR_CODES.has(errCode)) {
+            // Popup modal is the immediate user-facing blocking notification
+            onShowValidationModal?.(buildModalStateFromError(err, {
+              t1Name: scenario.uploadedFile?.images?.[0]?.name,
+              t2Name: scenario.uploadedFile?.images?.[1]?.name
+            }));
+            // Clear comparison imagery ID so active scene does not remain an invalid pair
+            setBackendComparisonImageryId(null);
+            // Return early without adding duplicate error chat message
+            return;
+          }
           if (!activeModel) {
             const errorMsg = {
               id: `ai-${Date.now()}`,
               sender: 'ai',
-              text: `Failed to submit analysis request: ${err.message || 'unknown error'}`,
+              text: formatChangeDetectionError(err) || `Failed to submit analysis request: ${err.message || 'unknown error'}`,
               isError: true,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
@@ -325,6 +393,54 @@ export function Workspace({
     }
   };
 
+  const activeSceneLabel = (() => {
+    if (backendComparisonImageryId && scenario.uploadedFile?.isPair) {
+      return scenario.uploadedFile.name;
+    }
+    if (scenario.uploadedFile?.isPair && !backendComparisonImageryId) {
+      return scenario.uploadedFile.images?.[0]?.name || scenario.title;
+    }
+    return scenario.uploadedFile?.name || scenario.title;
+  })();
+
+  const handleCompareClick = async () => {
+    if (backendImageryId && backendComparisonImageryId) {
+      try {
+        const validation = await validateChangeDetection(backendImageryId, backendComparisonImageryId);
+        if (!validation.valid) {
+          onShowValidationModal?.(buildModalStateFromValidation(validation, {
+            t1Name: scenario.uploadedFile?.images?.[0]?.name,
+            t2Name: scenario.uploadedFile?.images?.[1]?.name
+          }));
+          return;
+        }
+      } catch (err) {
+        const errCode = err?.code || err?.detail?.code || err?.detail?.error_code;
+        if (CHANGE_DETECTION_ERROR_CODES.has(errCode)) {
+          onShowValidationModal?.(buildModalStateFromError(err, {
+            t1Name: scenario.uploadedFile?.images?.[0]?.name,
+            t2Name: scenario.uploadedFile?.images?.[1]?.name
+          }));
+          return;
+        }
+      }
+    } else if (!backendComparisonImageryId) {
+      onShowValidationModal?.({
+        open: true,
+        title: "Invalid Input",
+        message: "Change detection requires two compatible satellite images (T1 baseline and T2 target).",
+        errorCode: "IMAGE_COUNT_MISMATCH",
+        details: {
+          t1: scenario.uploadedFile?.images?.[0]?.name || scenario.uploadedFile?.name || "Image 1 (Active)",
+          t2: "Missing (Please attach or upload a comparison image)"
+        },
+        resolution: "Upload or attach a second image to perform bi-temporal change comparison."
+      });
+      return;
+    }
+    onNavigateScreen('change');
+  };
+
   return (
     <div className="workspace-layout">
       {/* LEFT COLUMN: Large Satellite Image Viewer */}
@@ -359,7 +475,7 @@ export function Workspace({
             <div>
               <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>SatQuery AI Multi-Turn Agent</div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                Active Scene: {scenario.uploadedFile?.name || scenario.title} ({scenario.sensor || 'Sensor unspecified'})
+                Active Scene: {activeSceneLabel} ({scenario.sensor || 'Sensor unspecified'})
               </div>
             </div>
           </div>
@@ -369,7 +485,7 @@ export function Workspace({
             <button 
               className="btn btn-secondary" 
               style={{ padding: '6px 12px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 5 }}
-              onClick={() => onNavigateScreen('change')}
+              onClick={handleCompareClick}
               title="Compare Before & After Satellite Imagery"
             >
               <GitCompare size={13} />
@@ -476,8 +592,8 @@ export function Workspace({
                 <div className="ai-response-header">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div className="isro-live-dot"></div>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent)' }}>
-                      {msg.taskType || 'Analysis Request'}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: msg.isError ? 'var(--color-error)' : 'var(--accent)' }}>
+                      {msg.taskType || (msg.isError ? 'Invalid Input' : 'Analysis Request')}
                     </span>
                   </div>
 
@@ -487,6 +603,10 @@ export function Workspace({
                       <span className="badge badge-high" title="Ensemble Calibrated Confidence Score">
                         <ShieldCheck size={13} />
                         <span>{msg.confidence}% Confidence</span>
+                      </span>
+                    ) : msg.isError ? (
+                      <span className="badge badge-low" title="Validation failed -- nothing was queued">
+                        <span>Rejected</span>
                       </span>
                     ) : msg.status ? (
                       <span className="badge badge-high" title="Analysis job status" style={{ textTransform: 'capitalize' }}>

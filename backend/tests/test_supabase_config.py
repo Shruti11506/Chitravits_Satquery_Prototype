@@ -77,4 +77,4 @@ def test_health_reports_not_configured(client, monkeypatch):
     body = client.get("/api/v1/health/supabase").json()
     assert body["success"] is False
     assert body["data"]["supabase"] == "not_configured"
-    assert body["error"] == {"code": "SUPABASE_NOT_CONFIGURED", "message": NOT_CONFIGURED_MESSAGE}
+    assert body["error"] == {"code": "SUPABASE_NOT_CONFIGURED", "message": NOT_CONFIGURED_MESSAGE, "details": None}

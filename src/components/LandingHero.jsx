@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { ChitravitsEmblem } from './ui/ChitravitsLogo';
 import { SUGGESTED_QUERIES } from '../data/mockData';
-import { uploadImagery, uploadImageryPair } from '../lib/apiClient';
+import { uploadImagery, uploadImageryPair, validateChangeDetection } from '../lib/apiClient';
+import { isChangeDetectionIntent, buildModalStateFromValidation } from '../lib/changeDetectionValidation';
 import {
   getFilePreviewUrl, getImageryGeo, hasRealPreview, validateSatelliteFile,
   makePairAttachment, fileExtensionLabel, MAX_UPLOAD_MB, getPreviewNote
@@ -112,7 +113,15 @@ function PairSlot({ config, slot, disabled, onSelect, onRemove }) {
   );
 }
 
-export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUploaded, activeModel, activeProject, onNavigateScreen }) {
+export function LandingHero({
+  onStartAnalysis,
+  onStartConversation,
+  onImageryUploaded,
+  activeModel,
+  activeProject,
+  onNavigateScreen,
+  onShowValidationModal
+}) {
   const [prompt, setPrompt] = useState('');
   // 'single' = the original one-image upload, unchanged; 'pair' = Image 1 + Image 2.
   const [uploadMode, setUploadMode] = useState('single');
@@ -242,6 +251,40 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
       const conversationId = await onStartConversation();
       const result = await uploadImageryPair(first.file, second.file, { conversationId });
       console.info('[SatQuery] Image pair uploaded to Supabase Storage:', result.image_1.storage_path, result.image_2.storage_path);
+
+      // HARD GATE: Validate T1/T2 pair compatibility via backend BEFORE accepting or creating active scene!
+      try {
+        const validation = await validateChangeDetection(result.image_1.id, result.image_2.id);
+        if (!validation.valid) {
+          if (!isMountedRef.current) return;
+          setPairStatus('invalid');
+          setIsUploadingPair(false);
+          setPairError('These images are incompatible for change detection. Please replace the incompatible image.');
+          onShowValidationModal?.(
+            buildModalStateFromValidation(validation, {
+              onReplace: () => {
+                setPairError('');
+              }
+            })
+          );
+          return; // HARD STOP: Never create active scene, never queue, never proceed to workspace!
+        }
+      } catch (valErr) {
+        console.warn('[SatQuery] Validation check error:', valErr);
+        // If the validation endpoint itself raised an ApiRequestError (e.g. 422)
+        if (valErr?.code && onShowValidationModal) {
+          if (!isMountedRef.current) return;
+          setPairStatus('invalid');
+          setIsUploadingPair(false);
+          setPairError('These images are incompatible for change detection. Please replace the incompatible image.');
+          onShowValidationModal(buildModalStateFromValidation({
+            valid: false,
+            errors: [{ code: valErr.code, message: valErr.message }]
+          }));
+          return;
+        }
+      }
+
       const toAttachment = (slot, stored) => ({
         name: slot.file.name,
         size: formatMb(slot.file.size),
@@ -273,6 +316,23 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
   };
 
   const handleAnalyze = () => {
+    if (uploadMode === 'single' && isChangeDetectionIntent(prompt)) {
+      onShowValidationModal?.({
+        open: true,
+        title: 'Invalid Input',
+        message: 'Change detection requires two images (T1 reference and T2 comparison).',
+        errorCode: 'IMAGE_COUNT_MISMATCH',
+        details: {
+          t1: uploadedFile?.name ? `${uploadedFile.name} (Single image attached)` : 'Single image attached',
+          t2: 'Comparison image missing'
+        },
+        resolution: 'Please switch to "Image Pair" mode above and upload both Image 1 and Image 2 to run change detection.',
+        onReplace: () => {
+          setUploadMode('pair');
+        }
+      });
+      return;
+    }
     if (uploadMode === 'pair') {
       if (!isUploadingPair) submitPair();
       return;

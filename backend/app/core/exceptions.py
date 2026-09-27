@@ -4,13 +4,17 @@ Services raise these instead of HTTPException so they stay decoupled from
 FastAPI/HTTP concerns; the route layer (or the global handler) translates
 them into the standard ApiResponse error envelope.
 """
+from typing import Any
 
 
 class ApiError(Exception):
-    def __init__(self, *, status_code: int, code: str, message: str):
+    def __init__(self, *, status_code: int, code: str, message: str, details: dict[str, Any] | None = None):
         self.status_code = status_code
         self.code = code
         self.message = message
+        # Optional structured payload beyond one message -- see
+        # schemas/common.py::ErrorDetail.details. None for most errors.
+        self.details = details
         super().__init__(message)
 
 
@@ -20,8 +24,8 @@ class NotFoundError(ApiError):
 
 
 class ValidationAppError(ApiError):
-    def __init__(self, code: str, message: str):
-        super().__init__(status_code=422, code=code, message=message)
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None):
+        super().__init__(status_code=422, code=code, message=message, details=details)
 
 
 class SupabaseError(ApiError):

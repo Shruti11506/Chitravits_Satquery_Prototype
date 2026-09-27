@@ -12,6 +12,10 @@ const API_BASE_URL =
 export interface ApiError {
   code: string;
   message: string;
+  /** Optional structured context beyond one message -- e.g. the
+   * change-detection compatibility gate (POST /analysis) attaches the full
+   * list of failed checks plus a T1/T2 summary here. Absent for most errors. */
+  details?: Record<string, unknown> | null;
 }
 
 export interface ApiResponse<T> {
@@ -23,12 +27,14 @@ export interface ApiResponse<T> {
 export class ApiRequestError extends Error {
   code: string;
   status: number;
+  details: Record<string, unknown> | null;
 
   constructor(status: number, error: ApiError) {
     super(error.message);
     this.name = "ApiRequestError";
     this.code = error.code;
     this.status = status;
+    this.details = error.details ?? null;
   }
 }
 
@@ -258,6 +264,88 @@ export function submitAnalysis(
       ...(comparisonImageryId ? { comparison_imagery_id: comparisonImageryId } : {}),
     }),
   });
+}
+
+// Codes analysis_service.py's change-detection compatibility gate can raise
+// (see backend/app/validation/errors.py) -- section 15/16 of the codes list.
+export const CHANGE_DETECTION_ERROR_CODES = new Set([
+  "MODALITY_MISMATCH", "IMAGE_TYPE_MISMATCH", "UNKNOWN_MODALITY", "BAND_MISMATCH",
+  "IMAGE_DIMENSION_MISMATCH", "ASPECT_RATIO_MISMATCH", "CRS_MISMATCH", "GEOREFERENCE_MISSING",
+  "CRS_MISSING", "FILE_FORMAT_MISMATCH", "NOT_DISTINCT_OBSERVATIONS", "FILE_CORRUPTED",
+  "IMAGE_COUNT_MISMATCH",
+]);
+
+export interface ChangeDetectionImageDetail {
+  filename?: string | null;
+  format?: string | null;
+  modality?: string | null;
+  bands?: string[];
+  width?: number | null;
+  height?: number | null;
+  aspect_ratio?: number | null;
+  crs?: string | null;
+}
+
+export interface ChangeDetectionValidationIssue {
+  code: string;
+  message: string;
+  input?: string | null;
+  t1?: string | null;
+  t2?: string | null;
+}
+
+export interface ChangeDetectionValidationResponse {
+  status: "VALID" | "REJECT";
+  valid: boolean;
+  t1: ChangeDetectionImageDetail | null;
+  t2: ChangeDetectionImageDetail | null;
+  errors: ChangeDetectionValidationIssue[];
+  warnings: ChangeDetectionValidationIssue[];
+}
+
+export async function validateChangeDetection(
+  t1ImageryId: string,
+  t2ImageryId: string,
+  requirements?: {
+    aspect_ratio_tolerance?: number;
+    require_exact_dimensions?: boolean;
+    require_matching_format?: boolean;
+    require_geospatial?: boolean;
+  }
+): Promise<ChangeDetectionValidationResponse> {
+  return request<ChangeDetectionValidationResponse>("/validation/change-detection", {
+    method: "POST",
+    body: JSON.stringify({
+      t1_imagery_id: t1ImageryId,
+      t2_imagery_id: t2ImageryId,
+      ...(requirements || {}),
+    }),
+  });
+}
+
+/**
+ * When `err` came from the change-detection compatibility gate (a rejected
+ * T1/T2 pair -- never a fabricated result, see analysis_service.py), a
+ * multi-line "Invalid Input" explanation naming what's wrong with each
+ * image; otherwise null, so the caller falls back to its own generic
+ * "Failed to submit analysis request: {message}" text. Callers render this
+ * through the SAME chat-bubble/isError UI already used for every other
+ * submission error -- no new component.
+ */
+export function formatChangeDetectionError(err: ApiRequestError): string | null {
+  if (!CHANGE_DETECTION_ERROR_CODES.has(err.code)) return null;
+  const details = err.details as { t1?: ChangeDetectionImageDetail; t2?: ChangeDetectionImageDetail } | null;
+
+  const lines = ["Invalid Input", "", "These images cannot be used together for change detection."];
+  const describe = (label: string, image?: ChangeDetectionImageDetail) => {
+    if (!image) return;
+    const parts = [image.format, image.modality].filter(Boolean).map((p) => String(p).toUpperCase());
+    lines.push("", label, parts.length ? parts.join(" • ") : "Could not be read");
+  };
+  describe("Image 1", details?.t1 ?? undefined);
+  describe("Image 2", details?.t2 ?? undefined);
+  lines.push("", err.message);
+  return lines.join("\n");
 }
 
 /** @deprecated use submitAnalysis */

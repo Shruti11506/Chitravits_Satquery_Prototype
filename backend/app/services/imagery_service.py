@@ -10,6 +10,8 @@ from app.core.exceptions import NotFoundError, SchemaNotMigratedError, StorageEr
 from app.db.supabase import get_supabase
 from app.schemas.imagery import ImageryCreate
 from app.services import raster_service, storage_service
+from app.validation import band_validator, modality_validator, raster_validator
+from app.validation.schemas import ChangeDetectionImageMetadata, ImageInput, ImageSummary
 
 logger = logging.getLogger(__name__)
 
@@ -420,3 +422,96 @@ def delete_imagery(imagery_id: str) -> None:
                 storage_service.delete_file(client, raster_service.thumbnail_path_for(storage_path))
             except StorageError:
                 logger.error("Thumbnail for deleted imagery %s could not be removed -- orphaned file.", imagery_id)
+
+
+def build_validation_image(imagery_id: str, *, role: str = "single", modality_hint: str | None = None) -> ImageInput:
+    """The `app.validation.schemas.ImageInput` for an already-uploaded image,
+    for `POST /api/v1/validation/validate` (app/api/routes/validation.py).
+
+    This is the ONLY place `app/validation/` meets Supabase -- the package
+    itself stays storage-agnostic (see its `__init__.py`). "Don't duplicate
+    the uploaded binary unnecessarily" (task brief section 14) is honoured
+    two ways:
+
+    * A TIFF whose structure was already recorded at upload time
+      (`imagery.metadata.raster.properties`, from raster_service.py) is
+      passed through as `known_properties` -- the file itself is never
+      re-downloaded or re-parsed.
+    * Otherwise (JPEG/PNG, or an older TIFF row that predates that pipeline)
+      the original is downloaded once, read-only, exactly as
+      `ensure_preview` already does for thumbnails.
+
+    Never raises: a missing row or a missing Storage object comes back as an
+    `ImageInput` with no content and no known_properties, which
+    `validation.service._inspect` reports as IMAGE_UNAVAILABLE -- a request
+    validating several images should see every problem, not stop at the
+    first one that doesn't exist.
+    """
+    try:
+        row = get_imagery(imagery_id)
+    except NotFoundError:
+        return ImageInput(filename=imagery_id, content_type=None, role=role, modality_hint=modality_hint, imagery_id=imagery_id)
+
+    filename = row.get("original_filename") or row.get("name") or imagery_id
+    common = dict(
+        filename=filename,
+        content_type=row.get("mime_type"),
+        role=role,
+        modality_hint=modality_hint,
+        sensor=row.get("sensor"),
+        source=row.get("source"),
+        imagery_id=str(row["id"]),
+        size_bytes=row.get("file_size"),
+    )
+
+    properties = ((row.get("metadata") or {}).get("raster") or {}).get("properties")
+    if properties:
+        return ImageInput(**common, known_properties=properties)
+
+    storage_path = row.get("storage_path")
+    if not storage_path:
+        return ImageInput(**common)
+    try:
+        content = storage_service.download_file(get_supabase(), storage_path)
+    except StorageError:
+        logger.warning("Could not download imagery %s for validation", imagery_id)
+        return ImageInput(**common)
+    return ImageInput(**common, content=content)
+
+
+def build_change_detection_metadata(imagery_id: str, label: str) -> ChangeDetectionImageMetadata:
+    """The `ChangeDetectionImageMetadata` (`app/validation/change_detection_validator.py`)
+    for an already-uploaded image, by `label` ("T1" or "T2"). Shared by
+    `POST /validation/change-detection` and `analysis_service.create_analysis`'s
+    change-detection gate, so both resolve a pair identically -- see
+    `build_validation_image`'s docstring for the Storage-reuse behaviour."""
+    role = "t1" if label == "T1" else "t2"
+    image = build_validation_image(imagery_id, role=role)
+    return ChangeDetectionImageMetadata(
+        label=label,
+        facts=raster_validator.resolve_facts(image),
+        extension=raster_validator.extension_of(image.filename),
+        filename=image.filename,
+        sensor=image.sensor,
+        source=image.source,
+        imagery_id=image.imagery_id,
+    )
+
+
+def change_detection_image_summary(image: ChangeDetectionImageMetadata) -> ImageSummary | None:
+    """`ImageSummary` for one side of a checked pair -- None when it couldn't
+    be read at all (nothing to summarize)."""
+    if image.facts.error:
+        return None
+    return ImageSummary(
+        filename=image.filename,
+        format=image.facts.format,
+        modality=modality_validator.detect_modality(
+            image.facts, extension=image.extension, sensor=image.sensor, source=image.source, hint=image.modality_hint
+        ),
+        bands=sorted(band_validator.detect_named_bands(image.facts)),
+        width=image.facts.width,
+        height=image.facts.height,
+        aspect_ratio=(image.facts.width / image.facts.height) if image.facts.width and image.facts.height else None,
+        crs=image.facts.crs,
+    )

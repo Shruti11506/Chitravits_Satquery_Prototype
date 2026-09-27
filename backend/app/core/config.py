@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     # streaks) when the profile has no timezone of its own.
     APP_TIMEZONE: str = "Asia/Kolkata"
 
+    # Input Validation resource limits (app/validation/limits.py). File size
+    # reuses MAX_UPLOAD_SIZE_MB above rather than a second setting for the
+    # same ceiling; these three are new and only meaningful to validation.
+    VALIDATION_MAX_IMAGE_WIDTH: int = 20000
+    VALIDATION_MAX_IMAGE_HEIGHT: int = 20000
+    VALIDATION_MAX_BANDS: int = 50
+    VALIDATION_MAX_INPUT_IMAGES: int = 2
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

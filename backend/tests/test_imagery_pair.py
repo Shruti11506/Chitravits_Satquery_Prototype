@@ -1,10 +1,26 @@
 """Image pair uploads (POST /imagery/pair) and pair-aware analysis requests."""
+import io
+
+from PIL import Image
+
 from app.services import storage_service
 from tests.fakes import FakeApiError
 from tests.test_imagery_raster import _geotiff
 
-JPEG = b"\xff\xd8\xff fake jpeg bytes"
-PNG = b"\x89PNG fake png bytes"
+
+def _rgb_bytes(fmt: str) -> bytes:
+    # Real, decodable images (not just magic-byte-prefixed placeholders):
+    # analysis_service's change-detection gate (see analysis_service.py)
+    # actually opens these now, for a pair query. Same 8x8 size and modality
+    # (plain RGB) for both, so a same-format/different-format pair is
+    # otherwise a compatible pair by every OTHER check.
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color=(10, 20, 30)).save(buf, format=fmt)
+    return buf.getvalue()
+
+
+JPEG = _rgb_bytes("JPEG")
+PNG = _rgb_bytes("PNG")
 
 
 def _pair(client, first=("a.jpg", JPEG, "image/jpeg"), second=("b.png", PNG, "image/png"), **form):
@@ -54,7 +70,7 @@ def test_pair_of_geotiffs_gets_thumbnails_and_coordinates(client, fake_supabase)
 def test_pair_requires_both_images(client, fake_supabase):
     response = _pair(client, second=None)
     assert response.status_code == 422
-    assert response.json()["error"] == {"code": "IMAGE_PAIR_INCOMPLETE", "message": "Please upload both images."}
+    assert response.json()["error"] == {"code": "IMAGE_PAIR_INCOMPLETE", "message": "Please upload both images.", "details": None}
     assert fake_supabase.storage.objects == {}
     assert fake_supabase.store.get("imagery", []) == []
 
@@ -142,8 +158,14 @@ def test_single_upload_rows_have_no_pair_fields(client, fake_supabase):
 
 
 def test_pair_query_stores_both_image_ids(client, fake_supabase):
+    # A pair that passes the change-detection compatibility gate
+    # (analysis_service._reject_incompatible_pair) -- same modality (named
+    # RGB bands), same dimensions, same CRS. A plain, non-georeferenced
+    # visual pair (e.g. two JPEGs) would legitimately be rejected here; that
+    # behaviour has its own dedicated tests (test_change_detection_validation.py).
+    geotiff_rgb = ("s.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
     conversation_id = _conversation(client)
-    pair = _pair(client, conversation_id=conversation_id).json()["data"]
+    pair = _pair(client, geotiff_rgb, geotiff_rgb, conversation_id=conversation_id).json()["data"]
     response = client.post("/api/v1/analysis", json={
         "imagery_id": pair["image_1"]["id"],
         "comparison_imagery_id": pair["image_2"]["id"],

@@ -25,9 +25,13 @@ import { InitialLoader } from './components/InitialLoader';
 import { getActiveModel, setActiveModelId } from './lib/modelsStorage';
 import { getActiveProjectId, setActiveProjectId } from './lib/projectsStorage';
 import { getImageryPreviewUrl, getImageryGeo, getPreviewNote, makePairAttachment } from './lib/filePreview';
+import { ChangeDetectionValidationModal } from './components/ChangeDetectionValidationModal';
 import {
   getImagery,
   submitAnalysis,
+  formatChangeDetectionError,
+  CHANGE_DETECTION_ERROR_CODES,
+  validateChangeDetection,
   getAnalysisHistory,
   createConversation,
   getConversation,
@@ -39,6 +43,7 @@ import {
   getProject,
   listProjects
 } from './lib/apiClient';
+import { buildModalStateFromError, buildModalStateFromValidation } from './lib/changeDetectionValidation';
 
 // Legacy pointer: chats created before conversations existed are keyed by imagery.
 const LAST_IMAGERY_KEY = 'satquery-last-imagery-id';
@@ -318,6 +323,33 @@ export function App() {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const activeProjectRef = useRef(null);
+
+  // Change Detection Validation Modal state
+  const [validationModal, setValidationModal] = useState({
+    open: false,
+    title: 'Invalid Input',
+    message: '',
+    errorCode: '',
+    details: null,
+    resolution: '',
+    onReplace: null
+  });
+
+  const handleOpenValidationModal = useCallback((modalConfig) => {
+    setValidationModal({
+      open: true,
+      title: modalConfig?.title || 'Invalid Input',
+      message: modalConfig?.message || 'These images cannot be used for change detection.',
+      errorCode: modalConfig?.errorCode || 'INVALID_INPUT',
+      details: modalConfig?.details || null,
+      resolution: modalConfig?.resolution || 'Change detection requires two compatible image types.',
+      onReplace: modalConfig?.onReplace || null
+    });
+  }, []);
+
+  const handleCloseValidationModal = useCallback(() => {
+    setValidationModal(prev => ({ ...prev, open: false }));
+  }, []);
   // The project id that should be pre-opened when ProjectsScreen mounts
   // (set when user clicks a project card in the sidebar).
   const [initialProjectId, setInitialProjectId] = useState(null);
@@ -756,13 +788,53 @@ export function App() {
         });
         handleQuerySubmitted(conversationId);
       } catch (err) {
+        if (CHANGE_DETECTION_ERROR_CODES.has(err?.code)) {
+          // HARD GATE: Incompatible images must NEVER become an active scene!
+          handleOpenValidationModal(
+            buildModalStateFromError(err, {
+              onReplace: () => {
+                setWorkspaceScenario(null);
+                setActiveScreen('landing');
+              }
+            })
+          );
+          return; // STOP! Do not create active scene, do not navigate to workspace!
+        }
         chatHistory.push({
           id: `ai-${Date.now()}`,
           sender: 'ai',
-          text: `Failed to submit analysis request: ${err.message || 'unknown error'}`,
+          text: formatChangeDetectionError(err) || `Failed to submit analysis request: ${err.message || 'unknown error'}`,
           isError: true,
           timestamp: nowTs()
         });
+      }
+    } else if (imageAttachment?.comparisonImageryId) {
+      // Prompt is empty but an image pair is attached: validate compatibility before promoting to active scene!
+      try {
+        const val = await validateChangeDetection(imageryId, imageAttachment.comparisonImageryId);
+        if (!val.valid) {
+          handleOpenValidationModal(
+            buildModalStateFromValidation(val, {
+              onReplace: () => {
+                setWorkspaceScenario(null);
+                setActiveScreen('landing');
+              }
+            })
+          );
+          return; // STOP! Do not create active scene!
+        }
+      } catch (err) {
+        if (CHANGE_DETECTION_ERROR_CODES.has(err?.code)) {
+          handleOpenValidationModal(
+            buildModalStateFromError(err, {
+              onReplace: () => {
+                setWorkspaceScenario(null);
+                setActiveScreen('landing');
+              }
+            })
+          );
+          return;
+        }
       }
     }
 
@@ -863,6 +935,14 @@ export function App() {
 
   return (
     <SidebarProvider defaultOpen={true}>
+      {/* Change Detection Input Validation Modal */}
+      <ChangeDetectionValidationModal
+        isOpen={validationModal.open}
+        onClose={handleCloseValidationModal}
+        onReplace={validationModal.onReplace}
+        modalState={validationModal}
+      />
+
       {/* SatQuery Satellite Intelligence Initial Workspace Loader */}
       {isInitializing && (
         <InitialLoader
@@ -954,6 +1034,7 @@ export function App() {
                 activeModel={activeModel}
                 activeProject={activeProject}
                 onNavigateScreen={navigateToScreen}
+                onShowValidationModal={handleOpenValidationModal}
               />
             )}
 
@@ -986,6 +1067,7 @@ export function App() {
                 onEnsureConversation={ensureConversationForUpload}
                 onAnalysisSubmitted={handleQuerySubmitted}
                 onImageryUploaded={bumpHistory}
+                onShowValidationModal={handleOpenValidationModal}
                 activeModel={activeModel}
                 activeProject={activeProject}
               />
