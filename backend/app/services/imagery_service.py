@@ -279,7 +279,14 @@ def list_imagery(page: int, page_size: int) -> tuple[list[dict], int]:
         logger.exception("Supabase list failed for imagery")
         raise SupabaseError("Failed to list imagery.") from exc
 
-    return response.data or [], response.count or 0
+    rows = []
+    for r in (response.data or []):
+        row = dict(r)
+        row["url"] = storage_service.resolve_url(client, row.get("storage_path"), missing_ok=True)
+        row["thumbnail_url"] = resolve_thumbnail_url(client, row)
+        rows.append(row)
+
+    return rows, response.count or 0
 
 
 def get_imagery(imagery_id: str) -> dict:

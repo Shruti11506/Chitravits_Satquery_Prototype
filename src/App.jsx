@@ -13,6 +13,7 @@ import { ProfileDashboard } from './components/ProfileDashboard';
 import { SettingsPage } from './components/SettingsPage';
 import { ModelAttachmentScreen } from './components/ModelAttachmentScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
+import { LibraryScreen } from './components/LibraryScreen';
 import './components/ModelAndProjects.css';
 import { executeThemeTransition } from './lib/themeTransition';
 import { ThemeTransitionWave } from './components/ui/ThemeTransitionPattern';
@@ -45,7 +46,7 @@ const LAST_IMAGERY_KEY = 'satquery-last-imagery-id';
 const LAST_CONVERSATION_KEY = 'satquery-last-conversation-id';
 // Set only while the profile or settings screen is open, so a refresh reopens it.
 const LAST_SCREEN_KEY = 'satquery-last-screen';
-const RESTORABLE_SCREENS = ['profile', 'settings'];
+const RESTORABLE_SCREENS = ['profile', 'settings', 'library'];
 // Cached copies of the SAVED theme / sidebar density (GET /settings is the
 // source of truth), only so the first frame paints right before it answers.
 const THEME_KEY = 'satquery-theme';
@@ -842,6 +843,24 @@ export function App() {
     }
   };
 
+  const handleOpenImageryInWorkspace = async (imageryRecord) => {
+    try {
+      const fullImagery = imageryRecord.url ? imageryRecord : await getImagery(imageryRecord.id);
+      if (imageryRecord.conversation_id) {
+        handleSelectConversation(imageryRecord.conversation_id);
+      } else {
+        const history = await getAnalysisHistory(200).catch(() => []);
+        const itemsForImage = history.filter(h => h.imagery_id === fullImagery.id);
+        openConversation(null);
+        setWorkspaceScenario(buildLegacyScenario(fullImagery, itemsForImage));
+        rememberPointer(LAST_IMAGERY_KEY, fullImagery.id);
+        navigateToScreen('workspace');
+      }
+    } catch (err) {
+      console.error('[SatQuery] Could not load imagery into workspace:', err);
+    }
+  };
+
   return (
     <SidebarProvider defaultOpen={true}>
       {/* SatQuery Satellite Intelligence Initial Workspace Loader */}
@@ -999,8 +1018,17 @@ export function App() {
               <ChangeDetection scenario={currentScenario} onGoBack={handleGoBack} />
             )}
 
-            {activeScreen === 'fusion' && (
-              <FusionViewer scenario={currentScenario} onGoBack={handleGoBack} />
+            {(activeScreen === 'library' || activeScreen === 'fusion') && (
+              <LibraryScreen
+                onGoBack={handleGoBack}
+                onOpenImageryInWorkspace={handleOpenImageryInWorkspace}
+                onStartProjectChat={handleStartProjectChat}
+                onOpenConversation={handleSelectConversation}
+                onNavigateScreen={navigateToScreen}
+                onEnsureConversation={ensureConversationForUpload}
+                onImageryUploaded={bumpHistory}
+                activeProject={activeProject}
+              />
             )}
 
 

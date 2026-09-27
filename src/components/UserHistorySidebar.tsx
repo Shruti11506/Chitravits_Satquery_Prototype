@@ -4,6 +4,7 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import {
   SquarePen,
+  Library,
   Image as ImageIcon,
   Compass,
   Cpu,
@@ -536,15 +537,15 @@ export function UserHistorySidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => {
-                onNavigateScreen("fusion")
+                onNavigateScreen("library")
                 dismissSidebar()
               }}
-              isActive={activeScreen === "fusion"}
-              tooltip="Images"
-              aria-label="Images"
+              isActive={activeScreen === "library"}
+              tooltip="Library"
+              aria-label="Library"
             >
-              <ImageIcon aria-hidden="true" />
-              <span>Images</span>
+              <Library aria-hidden="true" className="w-4 h-4 text-sidebar-foreground" />
+              <span>Library</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
