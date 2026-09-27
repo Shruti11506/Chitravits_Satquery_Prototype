@@ -520,10 +520,10 @@ export function UserHistorySidebar({
   }))
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border select-none">
+    <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border select-none">
       {/* Header: Brand, New Chat, and Sidebar Close Action */}
-      <SidebarHeader className="p-3 pb-2 border-b border-sidebar-border/30 group-data-[collapsible=icon]:p-2">
-        <div className="flex items-center justify-between gap-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2">
+      <SidebarHeader className="p-3 pb-2 border-b border-sidebar-border/30">
+        <div className="flex items-center justify-between gap-2">
           <div 
             className="flex items-center gap-2.5 px-1 cursor-pointer hover:opacity-90 transition-opacity min-w-0 flex-1"
             onClick={() => {
@@ -535,13 +535,13 @@ export function UserHistorySidebar({
             <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center p-0.5 border border-blue-500/40 shadow-sm shrink-0">
               <ChitravitsEmblem size={26} />
             </div>
-            <span className="font-bold text-base tracking-tight text-sidebar-foreground whitespace-nowrap group-data-[collapsible=icon]:hidden">
+            <span className="font-bold text-base tracking-tight text-sidebar-foreground whitespace-nowrap">
               Sat<span className="text-blue-500">Query</span> <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30 ml-0.5">AI</span>
             </span>
           </div>
 
           <div className="flex items-center gap-0.5">
-            <SidebarTrigger className="hover:bg-sidebar-accent rounded-lg p-1.5 transition-colors cursor-pointer text-sidebar-foreground" title="Toggle Sidebar (Ctrl+B)" />
+            <SidebarTrigger className="hover:bg-sidebar-accent rounded-lg p-1.5 transition-colors cursor-pointer text-sidebar-foreground" title="Close Sidebar (Ctrl+B)" />
           </div>
         </div>
 
@@ -557,7 +557,7 @@ export function UserHistorySidebar({
               aria-label="New Chat"
             >
               <SquarePen aria-hidden="true" />
-              <span className="group-data-[collapsible=icon]:hidden">New chat</span>
+              <span>New chat</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
@@ -572,7 +572,7 @@ export function UserHistorySidebar({
               aria-label="Images"
             >
               <ImageIcon aria-hidden="true" />
-              <span className="group-data-[collapsible=icon]:hidden">Images</span>
+              <span>Images</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
@@ -588,10 +588,10 @@ export function UserHistorySidebar({
               aria-label="Attach Model"
             >
               <Cpu className="w-4 h-4 text-sidebar-foreground" />
-              <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Attach model</span>
+              <span className="flex-1 truncate">Attach model</span>
               {activeModel && (
                 <span 
-                  className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)] shrink-0 group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:top-1 group-data-[collapsible=icon]:right-1" 
+                  className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)] shrink-0" 
                   title={`Active Model: ${activeModel.name}`} 
                 />
               )}
@@ -610,14 +610,14 @@ export function UserHistorySidebar({
               aria-label="Projects"
             >
               <FolderKanban className="w-4 h-4 text-sidebar-foreground" />
-              <span className="group-data-[collapsible=icon]:hidden">Projects</span>
+              <span>Projects</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
-      {/* Main Content: Chronological Chat History -- backend-driven only, hidden in collapsed icon mode */}
-      <SidebarContent className="px-2 scrollbar-thin group-data-[collapsible=icon]:hidden">
+      {/* Main Content: Chronological Chat History -- backend-driven only */}
+      <SidebarContent className="px-2 scrollbar-thin">
         {status === "loading" && (
           <div className="px-3 py-4 text-xs text-sidebar-foreground/50">Loading history…</div>
         )}
@@ -721,10 +721,30 @@ export function UserHistorySidebar({
         })}
       </SidebarContent>
 
-      {/* Footer: User Profile */}
-      <SidebarFooter className="p-3 border-t border-sidebar-border/60 mt-auto group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:pb-4">
+      {/* Footer: Settings & Appearance and User Profile */}
+      <SidebarFooter className="p-3 border-t border-sidebar-border/60">
         <SidebarMenu className="gap-1">
           <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={() => {
+                onOpenSettings();
+                dismissSidebar();
+              }}
+              isActive={activeScreen === "settings"}
+              tooltip="Settings & Appearance"
+            >
+              <Settings aria-hidden="true" />
+              <span>Settings & Appearance</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+
+          {/* User Profile Tile + its menu, which opens upward from it (anchored,
+              not portaled): it stays inside the sidebar at any width/height.
+              Spacing uses inline px / arbitrary px sizes on purpose: the global
+              `* { margin: 0; padding: 0 }` reset in index.css is unlayered, so
+              it overrides Tailwind's padding/margin utilities (p-*, m-*), and
+              rem sizes follow a 15px root. */}
+          <SidebarMenuItem className="mt-2 pt-2 border-t border-sidebar-border/40">
             <div className="relative">
               <SidebarMenuButton
                 ref={profileTriggerRef}
@@ -736,10 +756,10 @@ export function UserHistorySidebar({
                 tooltip={profileUser?.display_name || "Profile"}
                 onClick={() => setIsProfileMenuOpen((open) => !open)}
                 style={{ padding: "0 8px" }}
-                className="h-[52px] w-full gap-[10px] rounded-lg group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center"
+                className="h-[52px] w-full gap-[10px] rounded-lg"
               >
                 <ProfileAvatar user={profileUser} className="h-[36px] w-[36px] text-[13px] shrink-0" />
-                <div className="flex min-w-0 flex-1 flex-col justify-center group-data-[collapsible=icon]:hidden">
+                <div className="flex min-w-0 flex-1 flex-col justify-center">
                   <span className="truncate text-[15px] font-semibold leading-5 text-sidebar-foreground">
                     {profileUser?.display_name ?? "Profile"}
                   </span>
@@ -749,7 +769,7 @@ export function UserHistorySidebar({
                     </span>
                   )}
                 </div>
-                <span className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden" aria-hidden="true">
+                <span className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60" aria-hidden="true">
                   <MoreHorizontal className="h-[16px] w-[16px]" />
                 </span>
               </SidebarMenuButton>

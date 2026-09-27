@@ -215,7 +215,7 @@ function buildLegacyScenario(imagery, historyItemsForImage = []) {
 }
 
 function AppHeader({ theme, toggleTheme, activeScreen, handleNewChat, onGoBack }) {
-  const { isMobile } = useSidebar();
+  const { open } = useSidebar();
 
   return (
     <header className="minimal-header">
@@ -233,12 +233,27 @@ function AppHeader({ theme, toggleTheme, activeScreen, handleNewChat, onGoBack }
           </button>
         )}
 
-        {/* Mobile Trigger Button */}
-        {isMobile && (
-          <SidebarTrigger
-            className="sidebar-tab-trigger-btn"
-            title="Toggle Sidebar Menu"
-          />
+        {/* Sidebar Trigger Tab and Brand Logo/Title */}
+        {!open && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} className="animate-in fade-in duration-200">
+            <SidebarTrigger
+              className="sidebar-tab-trigger-btn"
+              title="Open History Sidebar"
+            />
+            <div 
+              className="brand-section" 
+              onClick={handleNewChat}
+              title="SatQuery AI - New Analysis"
+              style={{ cursor: 'pointer', padding: '4px 8px' }}
+            >
+              <div className="brand-logo-badge" style={{ width: 46, height: 46, padding: 3 }}>
+                <ChitravitsEmblem size={38} />
+              </div>
+              <span className="brand-title" style={{ fontSize: '1.32rem', fontWeight: 700, letterSpacing: '-0.025em' }}>
+                Sat<span className="brand-title-accent">Query</span> <span className="brand-title-ai" style={{ fontSize: '0.76rem', padding: '2.5px 8px', marginLeft: 6 }}>AI</span>
+              </span>
+            </div>
+          </div>
         )}
 
         {/* Clean Screen Title for Context */}
