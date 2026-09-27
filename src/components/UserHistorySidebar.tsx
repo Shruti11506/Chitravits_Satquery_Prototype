@@ -74,7 +74,6 @@ interface UserHistorySidebarProps {
   activeProjectId?: string | null
   onOpenProject?: (project: any) => void
   onOpenSettings: () => void
-  onGenerateReport?: (conversationId: string | null) => void
 }
 
 // One sidebar row. Conversations carry their stored title; legacy entries
@@ -182,10 +181,9 @@ interface ConversationRowProps {
   onSelect: (entry: SidebarEntry) => void
   onRename: (conversation: Conversation, title: string) => Promise<void>
   onDelete: (conversation: Conversation) => Promise<void>
-  onGenerateReport?: (conversationId: string | null) => void
 }
 
-function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete, onGenerateReport }: ConversationRowProps) {
+function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete }: ConversationRowProps) {
   const [isEditing, setIsEditing] = React.useState(false)
   const [draft, setDraft] = React.useState(entry.title)
   const menuRef = React.useRef<HTMLDivElement>(null)
@@ -301,45 +299,19 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
         </SidebarMenuButton>
 
         {entry.kind === "conversation" && (
-          <>
-            {/* ··· Rename/Delete — shows on hover only */}
-            <button
-              ref={triggerRef}
-              data-state={isMenuOpen ? "open" : "closed"}
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenMenu(isMenuOpen ? null : entry.key)
-              }}
-              title="More options"
-              aria-label="Conversation options"
-              className="shrink-0 p-1 rounded-md opacity-0 group-hover/row:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-100 cursor-pointer"
-            >
-              <MoreHorizontal className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Generate Report — always visible, pushed to far right */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onGenerateReport?.(entry.conversation.id)
-              }}
-              title="Generate Report"
-              aria-label="Generate Report"
-              className="ml-auto shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.75rem] font-bold cursor-pointer whitespace-nowrap"
-              style={{
-                background: 'var(--accent-gradient)',
-                color: '#fff',
-                border: 'none',
-                boxShadow: 'var(--shadow-accent)',
-                letterSpacing: '0.02em',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.12)' }}
-              onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
-            >
-              <FileBarChart style={{ width: 14, height: 14 }} />
-              Generate Report
-            </button>
-          </>
+          <button
+            ref={triggerRef}
+            data-state={isMenuOpen ? "open" : "closed"}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenMenu(isMenuOpen ? null : entry.key)
+            }}
+            title="More options"
+            aria-label="Conversation options"
+            className="shrink-0 p-1 rounded-md opacity-0 group-hover/row:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-100 cursor-pointer"
+          >
+            <MoreHorizontal className="w-3.5 h-3.5" />
+          </button>
         )}
 
       </div>
@@ -708,10 +680,6 @@ export function UserHistorySidebar({
                       onSelect={handleItemClick}
                       onRename={handleRename}
                       onDelete={handleDelete}
-                      onGenerateReport={(convId) => {
-                        onNavigateScreen("report")
-                        dismissSidebar()
-                      }}
                     />
                   ))}
                 </SidebarMenu>
