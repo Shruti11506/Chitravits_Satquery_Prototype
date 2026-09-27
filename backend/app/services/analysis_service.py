@@ -81,6 +81,10 @@ def _reject_incompatible_pair(imagery_id: str, comparison_imagery_id: str) -> No
             "workflow": "change_detection",
             "error_code": first.code,
             "message": first.message,
+            "details": {
+                "t1": first.t1,
+                "t2": first.t2,
+            },
             "errors": [issue.model_dump() for issue in result.errors],
             "t1": _summary_dict(imagery_service.change_detection_image_summary(t1)),
             "t2": _summary_dict(imagery_service.change_detection_image_summary(t2)),

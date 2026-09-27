@@ -81,97 +81,103 @@ def validate_change_detection_inputs(
 ) -> ChangeDetectionValidationResult:
     t1, t2 = t1_metadata, t2_metadata
 
-    # 2. Both files readable?
+    # 1. Both files readable?
     unreadable = [
         ChangeDetectionIssue.of(FILE_CORRUPTED, f"{image.label} could not be read: {image.facts.error}", **{key: image.label})
         for image, key in ((t1, "t1"), (t2, "t2")) if image.facts.error
     ]
     if unreadable:
-        return ChangeDetectionValidationResult(valid=False, errors=unreadable)
+        return ChangeDetectionValidationResult(valid=False, status="REJECT", errors=unreadable)
 
-    # Not literally the same stored image -- see module docstring.
+    checks = {
+        "format": True,
+        "dimensions": True,
+        "aspect_ratio": True,
+        "band_count": True,
+        "dtype": True,
+        "crs": True,
+        "transform": True,
+    }
+
+    # Distinct images check -- not literally the same stored image
     if t1.imagery_id and t2.imagery_id and t1.imagery_id == t2.imagery_id:
-        return ChangeDetectionValidationResult(valid=False, errors=[ChangeDetectionIssue.of(
+        return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[ChangeDetectionIssue.of(
             NOT_DISTINCT_OBSERVATIONS,
             "T1 and T2 must be two different uploaded images; the same image was submitted for both.",
             t1=t1.label, t2=t2.label,
         )])
 
-    # 3. Supported format? (defensive -- file_validator already rejects an
-    # unsupported extension before this function is ever reached with real data)
+    # 2. Supported format?
     missing_format = [
         ChangeDetectionIssue.of(UNSUPPORTED_FORMAT, f"{image.label}'s format could not be determined.", **{key: image.label})
         for image, key in ((t1, "t1"), (t2, "t2")) if not image.facts.format
     ]
     if missing_format:
-        return ChangeDetectionValidationResult(valid=False, errors=missing_format)
+        checks["format"] = False
+        return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=missing_format)
 
-    # 6/7. Determine modality/image type, T1 modality == T2 modality? -- run
-    # BEFORE the format-family check below (see this module's docstring):
-    # this section's own bug report insists a JPEG/RGB image against a
-    # Sentinel-2 multispectral GeoTIFF returns MODALITY_MISMATCH, and step 7
-    # sits right after metadata extraction in the brief's own order (section
-    # 11) -- ahead of any format-family nuance, which isn't a numbered step
-    # in that order at all (it's this module's own addition, from an earlier
-    # brief -- section 10 below).
+    # 3. Modality Compatibility Check (KNOWN INCOMPATIBILITY)
+    # UNKNOWN + UNKNOWN is NOT automatically invalid -- continue deeper structural validation.
+    # Only reject here if BOTH modalities are KNOWN and genuinely incompatible (e.g. RGB vs SAR).
     modality_1, modality_2 = _detect(t1), _detect(t2)
-    if modality_1 == "unknown" or modality_2 == "unknown":
-        return ChangeDetectionValidationResult(valid=False, errors=[ChangeDetectionIssue.of(
-            UNKNOWN_MODALITY,
-            "Unable to determine the image type required for change detection."
-            + (" One or both could not be determined; supply modality_hint explicitly." if "unknown" in (modality_1, modality_2) else ""),
-            t1=_modality_label(modality_1), t2=_modality_label(modality_2),
-        )])
-    if modality_1 != modality_2:
-        return ChangeDetectionValidationResult(valid=False, errors=[ChangeDetectionIssue.of(
+    if modality_1 != "unknown" and modality_2 != "unknown" and modality_1 != modality_2:
+        return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[ChangeDetectionIssue.of(
             IMAGE_TYPE_MISMATCH,
             f"{t1.label} and {t2.label} have incompatible image types for change detection.",
             t1=_modality_label(modality_1), t2=_modality_label(modality_2),
         )])
 
-    # Matching raster format between T1 and T2 (section 10) -- ONE "plain
-    # image" family (JPEG/PNG, interchangeable for this check -- neither is
-    # ever georeferenced) vs the TIFF/GeoTIFF family. A TIFF without a CRS
-    # still counts as TIFF-family here; that distinction is the geospatial
-    # step's job below, not this one's.
+    # 4. Format family match between T1 and T2 (TIFF vs image)
     if workflow_requirements.require_matching_format:
         family_1 = "tiff" if t1.extension in TIFF_EXTENSIONS else "image"
         family_2 = "tiff" if t2.extension in TIFF_EXTENSIONS else "image"
         if family_1 != family_2:
-            return ChangeDetectionValidationResult(valid=False, errors=[ChangeDetectionIssue.of(
+            checks["format"] = False
+            return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[ChangeDetectionIssue.of(
                 FILE_FORMAT_MISMATCH,
                 f"{t1.label} is {t1.facts.format} but {t2.label} is {t2.facts.format}. "
                 "This workflow requires both images to be the same raster format.",
                 t1=t1.facts.format, t2=t2.facts.format,
             )])
 
-    # 6. Compatible aspect ratio?
+    # 5. Compatible aspect ratio?
     ratio_issue = dimension_validator.aspect_ratio_issue(
         t1.facts, t2.facts, tolerance=workflow_requirements.aspect_ratio_tolerance, t1_label=t1.label, t2_label=t2.label
     )
     if ratio_issue:
-        return ChangeDetectionValidationResult(valid=False, errors=[ratio_issue])
+        checks["aspect_ratio"] = False
+        return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[ratio_issue])
 
-    # 7. Compatible (exact) dimensions?
+    # 6. Compatible (exact) dimensions?
     if workflow_requirements.require_exact_dimensions:
         dim_issue = dimension_validator.exact_dimension_issue(t1.facts, t2.facts, t1_label=t1.label, t2_label=t2.label)
         if dim_issue:
-            return ChangeDetectionValidationResult(valid=False, errors=[dim_issue])
+            checks["dimensions"] = False
+            return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[dim_issue])
 
-    # 8/9. Band/channel structure -- SAR gets the strict VV<->VV / VH<->VH
-    # rule; every other modality gets a general "same detected bands" check.
-    band_issue = _sar_band_issue(t1, t2) if modality_1 == "sar" else _general_band_issue(t1, t2)
+    # 7. Band count compatibility
+    if t1.facts.band_count is not None and t2.facts.band_count is not None:
+        if t1.facts.band_count != t2.facts.band_count:
+            checks["band_count"] = False
+            return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[ChangeDetectionIssue.of(
+                BAND_MISMATCH,
+                f"{t1.label} has {t1.facts.band_count} band(s) but {t2.label} has {t2.facts.band_count} band(s). "
+                "Change detection requires compatible band counts.",
+                t1=f"{t1.facts.band_count} band(s)",
+                t2=f"{t2.facts.band_count} band(s)",
+            )])
+
+    # 8. Band/channel structure -- SAR gets strict polarization matching (VV<->VV / VH<->VH);
+    # other modalities get a general named bands check if names are present.
+    t1_sar_bands = band_validator.detect_named_bands(t1.facts).keys() & _SAR_BANDS
+    t2_sar_bands = band_validator.detect_named_bands(t2.facts).keys() & _SAR_BANDS
+    is_sar_check = modality_1 == "sar" or modality_2 == "sar" or bool(t1_sar_bands or t2_sar_bands)
+    band_issue = _sar_band_issue(t1, t2) if is_sar_check else _general_band_issue(t1, t2)
     if band_issue:
-        return ChangeDetectionValidationResult(valid=False, errors=[band_issue])
+        checks["band_count"] = False
+        return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[band_issue])
 
-    # 10/11. Geospatial completeness (per image), then CRS equality (cross-image).
-    # Only meaningful for a TIFF-family pair -- a plain JPEG/PNG pair was
-    # never expected to carry geospatial metadata (section 4/9: "JPEG/PNG
-    # should be treated as non-georeferenced by default"), so two otherwise-
-    # compatible JPEGs must not be rejected just for lacking a CRS neither
-    # side ever claimed to have. By this point modality and (when enabled)
-    # format-family already agree, so checking either extension is
-    # equivalent to checking both.
+    # 9. Geospatial completeness (per image), then CRS equality (cross-image).
     if workflow_requirements.require_geospatial and t1.extension in TIFF_EXTENSIONS:
         geo_issues = []
         for image, key in ((t1, "t1"), (t2, "t2")):
@@ -180,23 +186,24 @@ def validate_change_detection_inputs(
                 for issue in geospatial_issues(image.facts, input_label=image.label, required=True, extension=image.extension)
             )
         if geo_issues:
-            return ChangeDetectionValidationResult(valid=False, errors=geo_issues)
+            checks["crs"] = False
+            checks["transform"] = False
+            return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=geo_issues)
 
         crs_issue = crs_match_issue(t1.facts, t2.facts, t1_label=t1.label, t2_label=t2.label)
         if crs_issue:
+            checks["crs"] = False
             crs_issue = ChangeDetectionIssue.of(crs_issue.code, crs_issue.message, t1=t1.facts.crs, t2=t2.facts.crs)
-            return ChangeDetectionValidationResult(valid=False, errors=[crs_issue])
+            return ChangeDetectionValidationResult(valid=False, status="REJECT", checks=checks, errors=[crs_issue])
 
-    # 12. VALID.
-    return ChangeDetectionValidationResult(valid=True, errors=[])
+    # 10. VALID.
+    confidence = "exact" if (modality_1 != "unknown" and modality_2 != "unknown") else "structural"
+    return ChangeDetectionValidationResult(valid=True, status="VALID", confidence=confidence, checks=checks, errors=[])
 
 
 def _general_band_issue(t1: ChangeDetectionImageMetadata, t2: ChangeDetectionImageMetadata) -> ChangeDetectionIssue | None:
-    """Section 5: T1 and T2 must offer the same named bands (e.g. both
-    Red+NIR). Only compares bands this raster's own metadata actually
-    identifies -- an image with no named bands at all (common for a plain
-    optical/RGB scene) has nothing to compare, so this passes rather than
-    guessing; SAR's stricter single-band rule is `_sar_band_issue` below."""
+    """T1 and T2 must offer the same named bands (e.g. both Red+NIR) when named bands
+    are present in both images. If neither image has named bands, structural validation passes."""
     bands_1, bands_2 = set(band_validator.detect_named_bands(t1.facts)), set(band_validator.detect_named_bands(t2.facts))
     if not bands_1 and not bands_2:
         return None
@@ -210,18 +217,22 @@ def _general_band_issue(t1: ChangeDetectionImageMetadata, t2: ChangeDetectionIma
 
 
 def _sar_band_issue(t1: ChangeDetectionImageMetadata, t2: ChangeDetectionImageMetadata) -> ChangeDetectionIssue | None:
-    """Section 6, the mandatory rule: VV -> VV, VH -> VH, never VV+VH. If
-    either image's polarization can't be identified at all, this does NOT
-    silently pass -- an unconfirmed pair is never treated as valid."""
+    """SAR rule: VV -> VV, VH -> VH, never a mix. If either image's polarization
+    can't be identified at all, it's flagged as unidentified."""
     band_1 = next(iter(band_validator.detect_named_bands(t1.facts).keys() & _SAR_BANDS), None)
     band_2 = next(iter(band_validator.detect_named_bands(t2.facts).keys() & _SAR_BANDS), None)
     if band_1 is None or band_2 is None or band_1 != band_2:
+        val1 = band_1.upper() if band_1 else "unidentified"
+        val2 = band_2.upper() if band_2 else "unidentified"
+        if band_1 and band_2 and band_1 != band_2:
+            msg = f"SAR band mismatch: {t1.label} = {val1}, {t2.label} = {val2}. SAR change detection requires identical polarization."
+        else:
+            msg = f"SAR change detection requires the same polarization for {t1.label} and {t2.label} (VV -> VV, VH -> VH) -- never a mix."
         return ChangeDetectionIssue.of(
             BAND_MISMATCH,
-            f"SAR change detection requires the same polarization for {t1.label} and {t2.label} "
-            f"(VV -> VV, VH -> VH) -- never a mix.",
-            t1=band_1.upper() if band_1 else "unidentified",
-            t2=band_2.upper() if band_2 else "unidentified",
+            msg,
+            t1=val1,
+            t2=val2,
         )
     return None
 

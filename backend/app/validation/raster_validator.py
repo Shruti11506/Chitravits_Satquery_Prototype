@@ -66,6 +66,16 @@ def _extract_tiff(content: bytes) -> RasterFacts:
                 except Exception:  # noqa: BLE001 - a bad/exotic CRS shouldn't crash validation
                     logger.warning("Could not reproject raster bounds to WGS84 for validation", exc_info=True)
                     bounds_wgs84 = None
+            dataset_tags = dict(src.tags()) if hasattr(src, "tags") else {}
+            band_tags = []
+            if hasattr(src, "tags"):
+                for i in range(1, src.count + 1):
+                    try:
+                        band_tags.append(dict(src.tags(i)))
+                    except Exception:
+                        band_tags.append({})
+            units = list(src.units) if hasattr(src, "units") and src.units else []
+            nodata = src.nodata if src.nodata is None or _finite(src.nodata) else str(src.nodata)
             return RasterFacts(
                 format="GeoTIFF" if georeferenced else "TIFF",
                 width=src.width,
@@ -78,6 +88,11 @@ def _extract_tiff(content: bytes) -> RasterFacts:
                 band_descriptions=list(src.descriptions),
                 color_interpretation=[ci.name for ci in src.colorinterp],
                 georeferenced=georeferenced,
+                driver=src.driver,
+                nodata=nodata,
+                tags=dataset_tags,
+                band_tags=band_tags,
+                units=units,
             )
     except Exception as exc:  # noqa: BLE001 - any unreadable/corrupt TIFF lands here
         logger.info("TIFF could not be opened for validation: %s", exc)
@@ -124,6 +139,11 @@ def facts_from_known_properties(properties: dict) -> RasterFacts:
         band_descriptions=list(properties.get("band_descriptions") or []),
         color_interpretation=list(properties.get("color_interpretation") or []),
         georeferenced=georeferenced,
+        driver=properties.get("driver"),
+        nodata=properties.get("nodata"),
+        tags=dict(properties.get("tags") or {}),
+        band_tags=list(properties.get("band_tags") or []),
+        units=list(properties.get("units") or []),
     )
 
 

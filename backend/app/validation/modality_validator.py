@@ -52,14 +52,16 @@ def detect_modality(facts: RasterFacts, *, extension: str, sensor: str | None, s
         return "rgb"  # a decoded JPEG/PNG pixel buffer is RGB by construction
 
     # Structural signal alone is exhausted; fall back to explicit,
-    # user-entered sensor metadata for the two genuinely ambiguous cases
-    # (an unnamed 1-2 band TIFF, or a 3-band TIFF with no colour info).
-    metadata_text = " ".join(filter(None, (sensor, source)))
+    # user-entered sensor metadata or dataset tags for ambiguous cases
+    tags_text = " ".join(facts.tags.values()) if getattr(facts, "tags", None) else ""
+    metadata_text = " ".join(filter(None, (sensor, source, tags_text)))
     if metadata_text:
         if facts.band_count and facts.band_count <= 2 and _SAR_TERMS.search(metadata_text):
             return "sar"
         if facts.band_count and facts.band_count <= 3 and _OPTICAL_TERMS.search(metadata_text):
             return "optical"
+        if facts.band_count and facts.band_count > 3 and _OPTICAL_TERMS.search(metadata_text):
+            return "multispectral"
 
     return "unknown"
 

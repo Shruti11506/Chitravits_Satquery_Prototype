@@ -70,30 +70,41 @@ export function buildModalStateFromValidation(validationResult, options = {}) {
       resolution = 'Ensure uploaded satellite images have valid raster metadata and recognizable spectral bands.';
       break;
 
-    case 'BAND_MISMATCH':
+    case 'BAND_MISMATCH': {
       title = 'Invalid Input';
-      message = 'The selected images use incompatible spectral or polarization bands.';
-      if (firstError.message?.includes('SAR') || t1?.modality === 'sar' || t2?.modality === 'sar') {
+      const isSar = firstError.message?.toLowerCase().includes('sar') ||
+                    t1?.modality === 'sar' ||
+                    t2?.modality === 'sar' ||
+                    (firstError.t1 && ['VV', 'VH', 'HH', 'HV'].includes(String(firstError.t1).toUpperCase())) ||
+                    (firstError.t2 && ['VV', 'VH', 'HH', 'HV'].includes(String(firstError.t2).toUpperCase()));
+      if (isSar) {
+        message = firstError.message || 'SAR band mismatch: T1 and T2 contain different polarization bands.';
         details = {
           t1: `T1: ${firstError.t1 || (t1?.bands?.join('+') || 'Unidentified')}`,
           t2: `T2: ${firstError.t2 || (t2?.bands?.join('+') || 'Unidentified')}`
         };
         resolution = 'SAR change detection requires identical polarization (VV → VV or VH → VH) — never a mix.';
       } else {
+        message = firstError.message || 'The selected images use incompatible spectral bands or band counts.';
         details = {
-          t1: `T1: ${firstError.t1 || (t1?.bands?.join('+') || 'Bands mismatch')}`,
-          t2: `T2: ${firstError.t2 || (t2?.bands?.join('+') || 'Bands mismatch')}`
+          t1: firstError.t1 ? `T1: ${firstError.t1}` : (t1?.bands?.length ? `T1: ${t1.bands.join('+')}` : (t1?.band_count ? `T1: ${t1.band_count} bands` : 'Bands mismatch')),
+          t2: firstError.t2 ? `T2: ${firstError.t2}` : (t2?.bands?.length ? `T2: ${t2.bands.join('+')}` : (t2?.band_count ? `T2: ${t2.band_count} bands` : 'Bands mismatch'))
         };
-        resolution = 'Required spectral bands must exist in both T1 and T2 rasters.';
+        resolution = 'Required spectral bands and band counts must match between T1 and T2 rasters.';
       }
       break;
+    }
 
     case 'IMAGE_DIMENSION_MISMATCH':
       title = 'Invalid Input';
-      message = 'The image dimensions are not compatible for change detection.';
+      message = 'Image dimensions are incompatible for change detection.';
       details = {
-        t1: t1?.width && t1?.height ? `T1: ${t1.width} × ${t1.height}` : 'T1: Dimension mismatch',
-        t2: t2?.width && t2?.height ? `T2: ${t2.width} × ${t2.height}` : 'T2: Dimension mismatch'
+        t1: t1?.width && t1?.height
+          ? `${t1.format || 'GeoTIFF'} • ${t1.width} × ${t1.height}`
+          : (firstError.t1 ? `GeoTIFF • ${String(firstError.t1).replace('x', ' × ')}` : 'Dimension mismatch'),
+        t2: t2?.width && t2?.height
+          ? `${t2.format || 'GeoTIFF'} • ${t2.width} × ${t2.height}`
+          : (firstError.t2 ? `GeoTIFF • ${String(firstError.t2).replace('x', ' × ')}` : 'Dimension mismatch')
       };
       resolution = 'Pixel-level change detection requires both rasters to have matching pixel dimensions.';
       break;

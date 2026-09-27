@@ -169,6 +169,15 @@ def _render_thumbnail(src) -> tuple[bytes, dict[str, Any]]:
 def _properties(src) -> dict[str, Any]:
     """What the file is, as read from it (JSON-safe)."""
     georeferenced = src.crs is not None
+    dataset_tags = dict(src.tags()) if hasattr(src, "tags") else {}
+    band_tags = []
+    if hasattr(src, "tags"):
+        for i in range(1, src.count + 1):
+            try:
+                band_tags.append(dict(src.tags(i)))
+            except Exception:
+                band_tags.append({})
+    units = list(src.units) if hasattr(src, "units") and src.units else []
     return {
         "driver": src.driver,
         "width": src.width,
@@ -182,6 +191,9 @@ def _properties(src) -> dict[str, Any]:
         "transform": list(src.transform)[:6] if georeferenced else None,
         "bounds": list(src.bounds) if georeferenced else None,
         "georeferenced": georeferenced,
+        "tags": dataset_tags,
+        "band_tags": band_tags,
+        "units": units,
     }
 
 

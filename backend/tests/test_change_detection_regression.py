@@ -164,15 +164,9 @@ def test_different_crs_is_rejected(client, fake_supabase):
 
 
 def test_missing_crs_is_rejected(client, fake_supabase):
-    t1 = _upload(client, "t1.tif", _plain_tiff(), "image/tiff")
+    t1 = _upload(client, "t1.tif", _plain_tiff(count=3), "image/tiff")
     t2 = _upload(client, "t2.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
-    # T1 has no named bands either, so modality (checked first) is what
-    # actually fires here -- both "missing CRS" and "unidentified modality"
-    # are honest reasons for the SAME under-described file to be rejected;
-    # either is an acceptable, non-fabricated answer.
-    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={
-        "MODALITY_MISMATCH", "IMAGE_TYPE_MISMATCH", "UNKNOWN_MODALITY", "CRS_MISSING", "GEOREFERENCE_MISSING",
-    })
+    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"CRS_MISSING", "GEOREFERENCE_MISSING"})
 
 
 def test_missing_crs_is_rejected_when_modality_is_otherwise_unambiguous(client, fake_supabase):
@@ -228,9 +222,10 @@ def test_reproduce_screenshot_multispectral_geotiff_t1_and_rgb_jpeg_t2(client, f
     assert after_jobs == before_jobs
 
 
-def test_unknown_modality_is_rejected_with_code(client, fake_supabase):
-    """T1 has unknown modality (plain unbanded tiff without sensor), T2 has optical bands."""
-    t1 = _upload(client, "unknown.tif", _plain_tiff(), "image/tiff")
+def test_unknown_modality_is_rejected_with_band_mismatch(client, fake_supabase):
+    """T1 has unknown modality (plain 1-band tiff), T2 has optical bands (3 bands).
+    Structural check correctly identifies BAND_MISMATCH rather than UNKNOWN_MODALITY."""
+    t1 = _upload(client, "unknown.tif", _plain_tiff(count=1), "image/tiff")
     t2 = _upload(client, "optical.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
 
     val_resp = client.post("/api/v1/validation/change-detection", json={
@@ -240,6 +235,27 @@ def test_unknown_modality_is_rejected_with_code(client, fake_supabase):
     assert val_resp.status_code == 200
     val_body = val_resp.json()["data"]
     assert val_body["valid"] is False
-    assert val_body["errors"][0]["code"] == "UNKNOWN_MODALITY"
+    assert val_body["errors"][0]["code"] == "BAND_MISMATCH"
 
-    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"UNKNOWN_MODALITY"})
+    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"BAND_MISMATCH"})
+
+
+def test_unknown_and_unknown_geotiff_same_structure_is_accepted(client, fake_supabase):
+    """Two GeoTIFFs without sensor tags or band descriptions, but structurally matching
+    (same dimensions, 1 band, same CRS, same transform) are accepted (UNKNOWN != INVALID)."""
+    t1 = _upload(client, "t1_unbanded.tif", _geotiff(descriptions=[], count=1, crs="EPSG:32643", width=64, height=48), "image/tiff")
+    t2 = _upload(client, "t2_unbanded.tif", _geotiff(descriptions=[], count=1, crs="EPSG:32643", width=64, height=48), "image/tiff")
+
+    val_resp = client.post("/api/v1/validation/change-detection", json={
+        "t1_imagery_id": t1,
+        "t2_imagery_id": t2,
+    })
+    assert val_resp.status_code == 200
+    val_body = val_resp.json()["data"]
+    assert val_body["valid"] is True
+    assert val_body["t1"]["modality"] == "unknown"
+    assert val_body["t2"]["modality"] == "unknown"
+
+    # Should succeed submission to analysis without validation error
+    resp = _submit(client, t1, t2)
+    assert resp.status_code == 201

@@ -85,3 +85,5 @@ app.include_router(profile.router, prefix=API_PREFIX)
 app.include_router(settings_routes.router, prefix=API_PREFIX)
 app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(validation.router, prefix=API_PREFIX)
+# Also expose /api/validation directly for dev/debug endpoints
+app.include_router(validation.router, prefix="/api")

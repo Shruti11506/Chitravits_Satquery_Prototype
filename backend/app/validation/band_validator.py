@@ -18,6 +18,8 @@ from __future__ import annotations
 from app.validation.errors import BAND_MISMATCH, BAND_MISSING, ValidationIssue
 from app.validation.schemas import RasterFacts
 
+import re
+
 # canonical band name -> the tokens (band description / colour-interp name,
 # case-insensitive, exact match) that identify it. Extend this table to
 # recognise more bands; nothing elsewhere needs to change.
@@ -44,21 +46,67 @@ _FAMILIES: tuple[frozenset[str], ...] = (
 _COLOR_INTERP_ALIAS = {"red": "red", "green": "green", "blue": "blue"}
 
 
+def _match_band_token(text: str) -> str | None:
+    token = (text or "").strip().lower()
+    if not token:
+        return None
+    for canonical, aliases in BAND_ALIASES.items():
+        if token in aliases:
+            return canonical
+    for canonical in ("vv", "vh", "hh", "hv"):
+        if re.search(rf"\b{canonical}\b", token):
+            return canonical
+    for canonical, aliases in BAND_ALIASES.items():
+        for alias in aliases:
+            if len(alias) >= 2 and re.search(rf"\b{re.escape(alias)}\b", token):
+                return canonical
+    return None
+
+
 def detect_named_bands(facts: RasterFacts) -> dict[str, int]:
     """canonical band name -> 1-based band index, for every band this
     raster's own metadata identifies. Never invents a name for an
     undescribed band."""
     found: dict[str, int] = {}
 
+    # 1. Band descriptions
     for index, description in enumerate(facts.band_descriptions, start=1):
-        token = (description or "").strip().lower()
-        if not token:
+        if not description:
             continue
-        for canonical, aliases in BAND_ALIASES.items():
-            if token in aliases and canonical not in found:
-                found[canonical] = index
+        canonical = _match_band_token(description)
+        if canonical and canonical not in found:
+            found[canonical] = index
 
-    # Fallback for red/green/blue via GDAL's own colour-interpretation tag
+    # 2. Per-band tags (src.tags(i))
+    if hasattr(facts, "band_tags") and facts.band_tags:
+        for index, btags in enumerate(facts.band_tags, start=1):
+            if not btags:
+                continue
+            for key in ("POLARIZATION", "POLARISATION", "POL", "NAME", "BAND_NAME", "DESCRIPTION", "BAND"):
+                val = btags.get(key) or btags.get(key.lower()) or btags.get(key.capitalize())
+                if val:
+                    canonical = _match_band_token(str(val))
+                    if canonical and canonical not in found:
+                        found[canonical] = index
+                        break
+            if index not in found.values():
+                for val in btags.values():
+                    canonical = _match_band_token(str(val))
+                    if canonical and canonical not in found:
+                        found[canonical] = index
+                        break
+
+    # 3. Dataset-level tags (e.g. single-band SAR GeoTIFF with POLARIZATION tag)
+    if hasattr(facts, "tags") and facts.tags and facts.band_count == 1 and 1 not in found.values():
+        for key in ("POLARIZATION", "POLARISATION", "POLARIZATION_CHANNELS", "POL", "BAND", "BAND_NAME", "DESCRIPTION"):
+            val = facts.tags.get(key) or facts.tags.get(key.lower())
+            if val:
+                canonical = _match_band_token(str(val))
+                if canonical and canonical not in found:
+                    found[canonical] = 1
+                    break
+
+    # 4. Fallback for red/green/blue via GDAL's own colour-interpretation tag
     # (real GeoTIFF RGB rasters usually carry this even with no band names) --
     # the same technique raster_service._pick_bands() uses for previews.
     for index, interp in enumerate(facts.color_interpretation, start=1):

@@ -65,12 +65,17 @@ def validate_change_detection(payload: ChangeDetectionRequest) -> ApiResponse[Ch
     )
 
     result = validate_change_detection_inputs(t1, t2, requirements)
+    first_error = result.errors[0] if result.errors else None
     response = ChangeDetectionResponse(
         status="VALID" if result.valid else "REJECT",
         valid=result.valid,
+        confidence=result.confidence,
+        checks=result.checks,
         t1=imagery_service.change_detection_image_summary(t1),
         t2=imagery_service.change_detection_image_summary(t2),
         errors=result.errors,
         warnings=result.warnings,
+        error_code=first_error.code if first_error else None,
+        message=first_error.message if first_error else None,
     )
     return ApiResponse.ok(response)

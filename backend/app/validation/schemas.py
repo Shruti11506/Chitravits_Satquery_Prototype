@@ -191,6 +191,11 @@ class RasterFacts:
     band_descriptions: list[str | None] = field(default_factory=list)
     color_interpretation: list[str] = field(default_factory=list)
     georeferenced: bool = False
+    driver: str | None = None
+    nodata: Any = None
+    tags: dict[str, str] = field(default_factory=dict)
+    band_tags: list[dict[str, str]] = field(default_factory=list)
+    units: list[str | None] = field(default_factory=list)
     error: str | None = None
 
 
@@ -220,6 +225,9 @@ class ChangeDetectionValidationResult(BaseModel):
     named distinctly to avoid colliding with `ValidationResult` above."""
 
     valid: bool
+    status: Literal["VALID", "REJECT"] = "VALID"
+    confidence: str | None = None
+    checks: dict[str, bool] = Field(default_factory=dict)
     errors: list[ChangeDetectionIssue] = Field(default_factory=list)
     warnings: list[ChangeDetectionIssue] = Field(default_factory=list)
 
@@ -231,6 +239,7 @@ class ImageSummary(BaseModel):
     format: str | None = None
     modality: Modality = "unknown"
     bands: list[str] = Field(default_factory=list)
+    band_count: int | None = None
     width: int | None = None
     height: int | None = None
     aspect_ratio: float | None = None
@@ -253,7 +262,11 @@ class ChangeDetectionResponse(BaseModel):
     status: Literal["VALID", "REJECT"]
     valid: bool
     workflow: str = "change_detection"
+    confidence: str | None = None
+    checks: dict[str, bool] = Field(default_factory=dict)
     t1: ImageSummary | None = None
     t2: ImageSummary | None = None
     errors: list[ChangeDetectionIssue] = Field(default_factory=list)
     warnings: list[ChangeDetectionIssue] = Field(default_factory=list)
+    error_code: str | None = None
+    message: str | None = None

@@ -510,6 +510,7 @@ def change_detection_image_summary(image: ChangeDetectionImageMetadata) -> Image
             image.facts, extension=image.extension, sensor=image.sensor, source=image.source, hint=image.modality_hint
         ),
         bands=sorted(band_validator.detect_named_bands(image.facts)),
+        band_count=image.facts.band_count,
         width=image.facts.width,
         height=image.facts.height,
         aspect_ratio=(image.facts.width / image.facts.height) if image.facts.width and image.facts.height else None,

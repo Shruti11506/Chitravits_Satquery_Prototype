@@ -28,14 +28,19 @@ ENDPOINT = "/api/v1/validation/change-detection"
 # ---- fixtures ------------------------------------------------------------------
 
 
-def _geotiff(*, descriptions, crs="EPSG:32643", width=64, height=48, count=None):
-    count = count if count is not None else len(descriptions)
+def _geotiff(*, descriptions, crs="EPSG:32643", width=64, height=48, count=None, tags=None, band_tags=None):
+    count = count if count is not None else (len(descriptions) or 1)
     data = np.zeros((count, height, width), dtype="uint16")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=width, height=height, count=count, dtype="uint16", crs=crs, transform=from_origin(776000, 1440000, 10, 10)) as dst:
             dst.write(data)
             for i, name in enumerate(descriptions, start=1):
                 dst.set_band_description(i, name)
+            if tags:
+                dst.update_tags(**tags)
+            if band_tags:
+                for i, btags in enumerate(band_tags, start=1):
+                    dst.update_tags(i, **btags)
         return mem.read()
 
 
@@ -86,6 +91,10 @@ def jpeg_scene(label="T1", imagery_id=None, **raster_kw):
 
 def ungeoref_tiff(label="T1", imagery_id=None, **raster_kw):
     return _meta(label, _plain_tiff(**raster_kw), "scan.tif", imagery_id=imagery_id)
+
+
+def unknown_geotiff(label="T1", width=64, height=48, count=1, crs="EPSG:32643", imagery_id=None, **raster_kw):
+    return _meta(label, _geotiff(descriptions=[], count=count, crs=crs, width=width, height=height, **raster_kw), "unknown.tif", imagery_id=imagery_id)
 
 
 # ---- section 1/17: the core VALID/REJECT gate ----------------------------------
@@ -452,5 +461,110 @@ def test_nonexistent_imagery_id_via_api_is_a_clean_reject(client, fake_supabase)
     assert body["status"] == "REJECT"
     assert body["errors"][0]["code"] == "FILE_CORRUPTED"
     assert body["t2"] is None
+
+
+# ---- Section 17 & 18 regression tests: Unknown modality & structural validation ----
+
+
+def test_unknown_unknown_structurally_compatible_is_valid():
+    """Scenario 1: GeoTIFF + GeoTIFF, Unknown + Unknown, Structurally compatible -> VALID."""
+    t1 = unknown_geotiff("T1", width=10980, height=10980, count=1, imagery_id="a")
+    t2 = unknown_geotiff("T2", width=10980, height=10980, count=1, imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, REQS)
+    assert result.valid is True
+    assert result.status == "VALID"
+    assert result.confidence == "structural"
+    assert result.errors == []
+
+
+def test_unknown_unknown_incompatible_dimensions_rejects_with_dimension_mismatch():
+    """Scenario 5: Unknown + Unknown but incompatible dimensions -> INVALID with IMAGE_DIMENSION_MISMATCH, NOT UNKNOWN_MODALITY."""
+    t1 = unknown_geotiff("T1", width=10980, height=10980, count=1, imagery_id="a")
+    t2 = unknown_geotiff("T2", width=5120, height=5120, count=1, imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, REQS)
+    assert result.valid is False
+    assert result.status == "REJECT"
+    assert len(result.errors) == 1
+    assert result.errors[0].code == IMAGE_DIMENSION_MISMATCH
+    assert "10980x10980" in result.errors[0].t1 and "5120x5120" in result.errors[0].t2
+
+
+def test_unknown_unknown_incompatible_band_count_rejects_with_band_mismatch():
+    """T1 = 13 bands, T2 = 1 band -> likely incompatible -> INVALID with BAND_MISMATCH."""
+    t1 = unknown_geotiff("T1", width=64, height=48, count=13, imagery_id="a")
+    t2 = unknown_geotiff("T2", width=64, height=48, count=1, imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, REQS)
+    assert result.valid is False
+    assert result.status == "REJECT"
+    assert result.errors[0].code == BAND_MISMATCH
+    assert "13" in result.errors[0].t1 and "1" in result.errors[0].t2
+
+
+def test_same_multispectral_bands_b02_b03_b04_b08_is_valid():
+    """Scenario 4b: Sentinel-2 style multispectral bands (B02, B03, B04, B08) -> VALID."""
+    bands = ["B02", "B03", "B04", "B08"]
+    t1 = _meta("T1", _geotiff(descriptions=bands), "s2_a.tif", imagery_id="a")
+    t2 = _meta("T2", _geotiff(descriptions=bands), "s2_b.tif", imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, REQS)
+    assert result.valid is True
+    assert result.errors == []
+
+
+def test_sar_band_mismatch_vv_vh_message_format():
+    """Scenario 3: VV + VH -> INVALID with SAR band mismatch."""
+    result = validate_change_detection_inputs(sar_vv("T1", imagery_id="a"), sar_vh("T2", imagery_id="b"), REQS)
+    assert result.valid is False
+    assert result.errors[0].code == BAND_MISMATCH
+    assert result.errors[0].t1 == "VV"
+    assert result.errors[0].t2 == "VH"
+    assert "SAR band mismatch" in result.errors[0].message
+
+
+def test_different_crs_rejected_with_crs_mismatch():
+    """EPSG:32643 + EPSG:4326 -> INVALID with CRS_MISMATCH."""
+    t1 = unknown_geotiff("T1", crs="EPSG:32643", imagery_id="a")
+    t2 = unknown_geotiff("T2", crs="EPSG:4326", imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, REQS)
+    assert result.valid is False
+    assert result.errors[0].code == CRS_MISMATCH
+    assert "32643" in result.errors[0].t1 and "4326" in result.errors[0].t2
+
+
+def test_unknown_unknown_geotiff_pair_valid_via_api(client, fake_supabase):
+    """End-to-end API test: uploading two structurally compatible unknown GeoTIFFs returns VALID."""
+    t1 = _upload(client, "u1.tif", _geotiff(descriptions=[]))
+    t2 = _upload(client, "u2.tif", _geotiff(descriptions=[]))
+    response = client.post(ENDPOINT, json={"t1_imagery_id": t1["id"], "t2_imagery_id": t2["id"]})
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["status"] == "VALID"
+    assert body["valid"] is True
+    assert body["confidence"] == "structural"
+    assert body["t1"]["modality"] == "unknown"
+    assert body["t2"]["modality"] == "unknown"
+    assert body["errors"] == []
+
+
+def test_unknown_unknown_geotiff_dimension_mismatch_via_api(client, fake_supabase):
+    """End-to-end API test: two unknown GeoTIFFs with mismatched dimensions return IMAGE_DIMENSION_MISMATCH."""
+    t1 = _upload(client, "u1.tif", _geotiff(descriptions=[], width=200, height=200))
+    t2 = _upload(client, "u2.tif", _geotiff(descriptions=[], width=100, height=100))
+    response = client.post(ENDPOINT, json={"t1_imagery_id": t1["id"], "t2_imagery_id": t2["id"]})
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["status"] == "REJECT"
+    assert body["valid"] is False
+    assert body["errors"][0]["code"] == IMAGE_DIMENSION_MISMATCH
+    assert body["error_code"] == IMAGE_DIMENSION_MISMATCH
+
+
+def test_geotiff_with_tags_detected_properly():
+    """Tags in GeoTIFF (e.g. POLARIZATION: VV) are correctly detected as SAR VV."""
+    t1 = _meta("T1", _geotiff(descriptions=[], tags={"POLARIZATION": "VV"}), "s1.tif", imagery_id="a")
+    t2 = _meta("T2", _geotiff(descriptions=[], tags={"POLARIZATION": "VV"}), "s1.tif", imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, REQS)
+    assert result.valid is True
+    assert result.status == "VALID"
+
 
 
