@@ -98,8 +98,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
     }
   };
 
-  const handleToggleSelectModel = (modelId, e) => {
-    e?.stopPropagation();
+  const handleToggleSelectModel = (modelId) => {
     setSelectedModelIds(prev => 
       prev.includes(modelId) ? prev.filter(id => id !== modelId) : [...prev, modelId]
     );
@@ -485,22 +484,23 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                     <div 
                       key={model.id}
                       onClick={() => setSelectedModel(model)}
-                      className={`model-list-card ${isDetailSelected ? 'selected' : ''} ${isActive ? 'active-model' : ''}`}
+                      className={`model-list-card ${isDetailSelected ? 'selected' : ''} ${isActive ? 'active-model' : ''} ${isTicked ? 'ticked' : ''}`}
                     >
                       <div className="card-top">
-                        <div 
+                        <label 
                           className="model-card-check-wrap"
-                          onClick={(e) => handleToggleSelectModel(model.id, e)}
+                          htmlFor={`chk-${model.id}`}
+                          onClick={(e) => e.stopPropagation()}
                           title={isTicked ? "Untick model" : "Tick model for activation"}
                         >
                           <input
                             type="checkbox"
                             checked={isTicked}
-                            onChange={(e) => handleToggleSelectModel(model.id, e)}
+                            onChange={() => handleToggleSelectModel(model.id)}
                             className="model-card-checkbox"
                             id={`chk-${model.id}`}
                           />
-                        </div>
+                        </label>
                         <div className="model-icon-badge">
                           <Cpu size={18} className={isActive ? 'text-emerald-400' : 'text-blue-400'} />
                         </div>
@@ -533,17 +533,29 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                               <CheckCircle2 size={13} /> Active on Right
                             </span>
                           ) : (
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
-                              className="btn btn-xs btn-secondary"
-                              title="Make this model active for queries"
-                            >
-                              Set Active
-                            </button>
+                            <>
+                              <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleToggleSelectModel(model.id); }}
+                                className={`btn btn-xs ${isTicked ? 'btn-primary' : 'btn-secondary'}`}
+                                title={isTicked ? "Untick model" : "Tick model for activation"}
+                              >
+                                {isTicked ? '✓ Ticked' : 'Tick to Select'}
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
+                                className="btn btn-xs btn-secondary"
+                                title="Make this model active for queries"
+                              >
+                                Set Active
+                              </button>
+                            </>
                           )}
 
                           {model.isCustom && (
                             <button 
+                              type="button"
                               onClick={(e) => handleDeleteModel(model.id, e)}
                               className="btn btn-xs btn-ghost text-red-400 hover:text-red-300"
                               title="Remove attached model"
