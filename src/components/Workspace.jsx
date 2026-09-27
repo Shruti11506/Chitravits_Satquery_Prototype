@@ -331,16 +331,6 @@ export function Workspace({
           gap: 12
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              className="btn btn-secondary btn-back-nav"
-              style={{ padding: '6px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              onClick={onGoBack || (() => onNavigateScreen('landing'))}
-              title="Back to Image Upload / Landing"
-            >
-              <ArrowLeft size={14} />
-              <span>Back</span>
-            </button>
-
             <div className="dropzone-icon-box" style={{ width: 34, height: 34, margin: 0 }}>
               <Sparkles size={16} />
             </div>

@@ -54,7 +54,9 @@ export function executeThemeTransition(nextTheme, event, callbacks = {}) {
   const satTargetX = Math.cos(satAngle) * (maxRadius * 0.98);
   const satTargetY = Math.sin(satAngle) * (maxRadius * 0.98);
 
-  const TRANSITION_DURATION = 2400; // 2.4s: dignified, majestic, buttery-smooth
+  // ⚠️  LOCKED — DO NOT CHANGE. 1600ms + cubic-bezier(0.32,0,0.2,1) is the
+  //     approved satellite orbital animation. Approved by user on 2026-09-27.
+  const TRANSITION_DURATION = 1600;
 
   // 1. Mount the single-orbit edge wavefront and single satellite overlay
   const waveId = Date.now();
@@ -72,7 +74,8 @@ export function executeThemeTransition(nextTheme, event, callbacks = {}) {
     nextTheme
   });
 
-  // Balanced cubic bezier: soft launch, steady orbital cruise, feather-soft arrival
+  // ⚠️  LOCKED — DO NOT CHANGE. This easing gives the authentic orbital-cruise
+  //     feel. Changing it breaks the satellite glide. Approved 2026-09-27.
   const timing = {
     duration: TRANSITION_DURATION,
     easing: 'cubic-bezier(0.32, 0, 0.2, 1)',

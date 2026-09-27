@@ -74,6 +74,7 @@ interface UserHistorySidebarProps {
   activeProjectId?: string | null
   onOpenProject?: (project: any) => void
   onOpenSettings: () => void
+  onGenerateReport?: (conversationId: string | null) => void
 }
 
 // One sidebar row. Conversations carry their stored title; legacy entries
@@ -181,9 +182,10 @@ interface ConversationRowProps {
   onSelect: (entry: SidebarEntry) => void
   onRename: (conversation: Conversation, title: string) => Promise<void>
   onDelete: (conversation: Conversation) => Promise<void>
+  onGenerateReport?: (conversationId: string | null) => void
 }
 
-function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete }: ConversationRowProps) {
+function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete, onGenerateReport }: ConversationRowProps) {
   const [isEditing, setIsEditing] = React.useState(false)
   const [draft, setDraft] = React.useState(entry.title)
   const menuRef = React.useRef<HTMLDivElement>(null)
@@ -284,78 +286,103 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        onClick={() => onSelect(entry)}
-        isActive={isActive}
-        data-row="conversation"
-        className="group/item"
-        tooltip={entry.title}
-      >
-        <ConversationIcon title={entry.title} />
-        <span className="truncate">{entry.title}</span>
-      </SidebarMenuButton>
+      <div className="group/row relative flex items-center w-full gap-1.5 px-1 rounded-lg">
 
-      {entry.kind === "conversation" && (
-        <>
-          <SidebarMenuAction
-            ref={triggerRef}
-            showOnHover
-            data-state={isMenuOpen ? "open" : "closed"}
-            onClick={(e) => {
-              e.stopPropagation()
-              onOpenMenu(isMenuOpen ? null : entry.key)
-            }}
-            title="Conversation options"
-            aria-label="Conversation options"
-          >
-            <MoreHorizontal />
-          </SidebarMenuAction>
+        {/* Chat title button — takes remaining space */}
+        <SidebarMenuButton
+          onClick={() => onSelect(entry)}
+          isActive={isActive}
+          data-row="conversation"
+          className="flex-1 min-w-0"
+          tooltip={entry.title}
+        >
+          <ConversationIcon title={entry.title} />
+          <span className="truncate">{entry.title}</span>
+        </SidebarMenuButton>
 
-          {isMenuOpen && createPortal(
-            // Rendered hidden for one layout pass so its real size can be measured.
-            // Explicit hsl(var(--sidebar-*)) colors: Tailwind 4 doesn't load
-            // tailwind.config.js, so bg-sidebar / text-sidebar-* generate nothing
-            // and the menu was see-through over the image viewer.
-            // z-[200]: above the workspace header (100), below modals (999).
-            // transition-none: duration-150 alone would transition `all`, sliding
-            // the menu in from its hidden measuring spot at 0,0.
-            <div
-              ref={menuRef}
-              role="menu"
-              style={menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 0, left: 0, visibility: "hidden" }}
-              className="fixed z-[200] flex w-[212px] flex-col gap-1 rounded-[11px] border border-[rgba(148,163,184,0.28)] bg-[hsl(var(--sidebar-background))] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.45),0_0_0_1px_rgba(59,130,246,0.05)] animate-in fade-in-0 zoom-in-95 duration-150 transition-none"
+        {entry.kind === "conversation" && (
+          <>
+            {/* ··· Rename/Delete — shows on hover only */}
+            <button
+              ref={triggerRef}
+              data-state={isMenuOpen ? "open" : "closed"}
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenMenu(isMenuOpen ? null : entry.key)
+              }}
+              title="More options"
+              aria-label="Conversation options"
+              className="shrink-0 p-1 rounded-md opacity-0 group-hover/row:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-100 cursor-pointer"
             >
-              <button
-                role="menuitem"
-                className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
-                onClick={() => {
-                  onOpenMenu(null)
-                  setDraft(entry.title)
-                  setIsEditing(true)
-                }}
-              >
-                <Pencil className="w-4 h-4 text-[hsl(var(--sidebar-foreground)/0.7)]" />
-                <span>Rename</span>
-              </button>
-              <button
-                role="menuitem"
-                className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-red-400/90 transition-colors duration-100 hover:bg-red-500/10 hover:text-red-400"
-                onClick={() => {
-                  onOpenMenu(null)
-                  onDelete(entry.conversation)
-                }}
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>Delete</span>
-              </button>
-            </div>,
-            document.body
-          )}
-        </>
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Generate Report — always visible, pushed to far right */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onGenerateReport?.(entry.conversation.id)
+              }}
+              title="Generate Report"
+              aria-label="Generate Report"
+              className="ml-auto shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-[0.75rem] font-bold cursor-pointer whitespace-nowrap"
+              style={{
+                background: 'var(--accent-gradient)',
+                color: '#fff',
+                border: 'none',
+                boxShadow: 'var(--shadow-accent)',
+                letterSpacing: '0.02em',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.12)' }}
+              onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
+            >
+              <FileBarChart style={{ width: 14, height: 14 }} />
+              Generate Report
+            </button>
+          </>
+        )}
+
+      </div>
+
+
+      {/* Portaled ··· dropdown: Rename + Delete */}
+      {entry.kind === "conversation" && isMenuOpen && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          style={menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 0, left: 0, visibility: "hidden" }}
+          className="fixed z-[200] flex w-[200px] flex-col gap-1 rounded-[11px] border border-[rgba(148,163,184,0.28)] bg-[hsl(var(--sidebar-background))] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.45),0_0_0_1px_rgba(59,130,246,0.05)] animate-in fade-in-0 zoom-in-95 duration-150 transition-none"
+        >
+          <button
+            role="menuitem"
+            className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
+            onClick={() => {
+              onOpenMenu(null)
+              setDraft(entry.title)
+              setIsEditing(true)
+            }}
+          >
+            <Pencil className="w-4 h-4 text-[hsl(var(--sidebar-foreground)/0.7)]" />
+            <span>Rename</span>
+          </button>
+          <button
+            role="menuitem"
+            className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-red-400/90 transition-colors duration-100 hover:bg-red-500/10 hover:text-red-400"
+            onClick={() => {
+              onOpenMenu(null)
+              onDelete(entry.conversation)
+            }}
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete</span>
+          </button>
+        </div>,
+        document.body
       )}
     </SidebarMenuItem>
   )
 }
+
 
 export function UserHistorySidebar({
   onNewChat,
@@ -376,7 +403,7 @@ export function UserHistorySidebar({
   projects,
   activeProjectId,
   onOpenProject,
-  onOpenSettings
+  onOpenSettings,
 }: UserHistorySidebarProps) {
   // Real backend data ONLY -- see CLAUDE.md / backend README. No hardcoded
   // entries, and a failed fetch never falls back to stale/sample data.
@@ -500,18 +527,18 @@ export function UserHistorySidebar({
       <SidebarHeader className="p-3 pb-2 border-b border-sidebar-border/30 group-data-[collapsible=icon]:p-2">
         <div className="flex items-center justify-between gap-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2">
           <div 
-            className="flex items-center gap-2 px-1 cursor-pointer hover:opacity-90 transition-opacity"
+            className="flex items-center gap-2.5 px-1 cursor-pointer hover:opacity-90 transition-opacity min-w-0 flex-1"
             onClick={() => {
               onNewChat()
               dismissSidebar()
             }}
             title="SatQuery AI - New Analysis"
           >
-            <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center p-0.5 border border-blue-500/40 shadow-sm shrink-0">
-              <ChitravitsEmblem size={24} />
+            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center p-0.5 border border-blue-500/40 shadow-sm shrink-0">
+              <ChitravitsEmblem size={26} />
             </div>
-            <span className="font-bold text-sm tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
-              Sat<span className="text-blue-500">Query</span> <span className="text-[10px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30 ml-0.5">AI</span>
+            <span className="font-bold text-base tracking-tight text-sidebar-foreground whitespace-nowrap group-data-[collapsible=icon]:hidden">
+              Sat<span className="text-blue-500">Query</span> <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30 ml-0.5">AI</span>
             </span>
           </div>
 
@@ -683,6 +710,10 @@ export function UserHistorySidebar({
                       onSelect={handleItemClick}
                       onRename={handleRename}
                       onDelete={handleDelete}
+                      onGenerateReport={(convId) => {
+                        onNavigateScreen("report")
+                        dismissSidebar()
+                      }}
                     />
                   ))}
                 </SidebarMenu>

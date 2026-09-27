@@ -99,9 +99,9 @@
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
 
   /* Transitions */
-  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-smooth: 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 0.08s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 0.13s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* 🌙 DARK THEME (Executive Pure Obsidian Black & Radiant High-Contrast Sapphire) */
@@ -192,8 +192,10 @@
 /* ==========================================================================
    Ultra-Smooth Patterned Theme Transitions & View Transition API
    ========================================================================== */
+/* ⚠️  LOCKED — DO NOT CHANGE. Matched to themeTransition.js (1600ms, cubic-bezier(0.32,0,0.2,1)).
+   Approved satellite orbital animation. Approved by user on 2026-09-27. */
 ::view-transition-group(root) {
-  animation-duration: 2.4s !important;
+  animation-duration: 1.6s !important;
   animation-timing-function: cubic-bezier(0.32, 0, 0.2, 1) !important;
 }
 
@@ -384,10 +386,10 @@ div[class*="sidebar"],
 .theme-toggle-btn,
 .status-chip,
 .badge {
-  transition: background-color 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-              border-color 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-              color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.10s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.12s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 html, body {
