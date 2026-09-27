@@ -505,9 +505,6 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                                 <span className="live-dot"></span> Active in Chat
                               </span>
                             )}
-                            {model.isCustom && (
-                              <span className="badge-pill badge-pill-custom">Custom</span>
-                            )}
                           </div>
                           <p className="model-task">{model.task} • {model.architecture}</p>
                         </div>
@@ -521,11 +518,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                         </div>
 
                         <div className="actions-row">
-                          {isActive ? (
-                            <span className="badge-on-right text-primary text-xs font-semibold flex items-center gap-1">
-                              <CheckCircle2 size={13} /> Active on Right
-                            </span>
-                          ) : (
+                          {isActive ? null : (
                             <button 
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
@@ -685,126 +678,140 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 </div>
               </div>
 
-              {/* See More: Checkpoints Toggle Accordion (Hidden by default to maintain readability) */}
+              {/* See More: Confidence, Advanced Tuning & Checkpoints Accordion */}
               <div className="checkpoints-accordion-wrap">
                 <button 
                   type="button" 
                   onClick={() => setShowCheckpoints(prev => !prev)}
                   className="btn-see-more-checkpoints"
-                  title="Click to view or hide checkpoint weights & config files"
+                  title="Click to view or hide confidence thresholds, tuning parameters & checkpoint files"
                 >
                   <div className="flex items-center gap-2">
-                    <HardDrive size={15} className="text-blue-500 dark:text-cyan-400" />
+                    <Sliders size={15} className="text-blue-500 dark:text-cyan-400" />
                     <span className="see-more-title">
                       {showCheckpoints 
-                        ? 'Hide Checkpoint Files' 
-                        : `See More (${selectedModel.files?.length || 0} Checkpoints & Config Files)`}
+                        ? 'Hide Confidence Tuning & Checkpoints' 
+                        : 'See More (Confidence, Tuning & Checkpoints)'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted">
-                    <span className="font-mono text-xs">{selectedModel.size}</span>
+                    <span className="font-mono text-xs text-primary font-semibold">
+                      {Math.round((selectedModel.confidenceThreshold || 0.5) * 100)}% Conf
+                    </span>
+                    <span className="text-muted/60">•</span>
+                    <span className="font-mono text-xs">{selectedModel.files?.length || 0} Files</span>
                     {showCheckpoints ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                   </div>
                 </button>
 
                 {showCheckpoints && (
                   <div className="checkpoints-expanded-panel animate-fadeIn">
-                    <div className="files-pill-container">
-                      {(selectedModel.files || []).map((file, idx) => (
-                        <div key={idx} className={`file-badge file-${file.type}`}>
-                          <FileCode size={13} />
-                          <span className="file-name">{file.name}</span>
-                          <span className="file-size">{file.size}</span>
-                          <span className="file-type-tag">{file.type}</span>
+                    {/* Tunable Inference & Confidence Parameters */}
+                    <div className="detail-section">
+                      <h4 className="detail-subheading">
+                        <Sliders size={14} className="text-blue-400 inline mr-1.5" />
+                        Inference Tuning & Confidence Thresholds
+                      </h4>
+
+                      <div className="settings-form-grid">
+                        <div className="form-group">
+                          <label className="form-label">Target Capability / Task</label>
+                          <select 
+                            value={selectedModel.task}
+                            onChange={(e) => handleUpdateModelSettings('task', e.target.value)}
+                            className="form-select-sm"
+                          >
+                            <option value="Object Detection">Object Detection (Buildings, Ships, Solar Panels)</option>
+                            <option value="Semantic Segmentation">Semantic Segmentation (Water Bodies, Canopy, Urban)</option>
+                            <option value="Land Cover Classification">Land Cover & Spectral Classification (LULC)</option>
+                            <option value="SAR Marine Target Detection">SAR Marine Target & Vessel Detection</option>
+                          </select>
                         </div>
-                      ))}
+
+                        <div className="form-group">
+                          <label className="form-label">Acceleration Device</label>
+                          <select 
+                            value={selectedModel.device}
+                            onChange={(e) => handleUpdateModelSettings('device', e.target.value)}
+                            className="form-select-sm"
+                          >
+                            <option value="WebGPU (Direct Tensor Core)">WebGPU (Direct Hardware Acceleration)</option>
+                            <option value="CUDA Local Daemon">CUDA Local GPU Daemon</option>
+                            <option value="WASM CPU Multithreaded">WASM CPU (Universal Fallback)</option>
+                          </select>
+                        </div>
+
+                        <div className="form-group">
+                          <div className="flex justify-between text-xs mb-1">
+                            <label className="form-label mb-0">Confidence Threshold</label>
+                            <span className="font-mono text-cyan-400 font-semibold">
+                              {Math.round((selectedModel.confidenceThreshold || 0.5) * 100)}%
+                            </span>
+                          </div>
+                          <input 
+                            type="range"
+                            min="0.10"
+                            max="0.95"
+                            step="0.05"
+                            value={selectedModel.confidenceThreshold || 0.5}
+                            onChange={(e) => handleUpdateModelSettings('confidenceThreshold', parseFloat(e.target.value))}
+                            className="form-slider"
+                          />
+                        </div>
+
+                        <div className="form-group">
+                          <div className="flex justify-between text-xs mb-1">
+                            <label className="form-label mb-0">NMS IoU Threshold</label>
+                            <span className="font-mono text-cyan-400 font-semibold">
+                              {Math.round((selectedModel.nmsThreshold || 0.45) * 100)}%
+                            </span>
+                          </div>
+                          <input 
+                            type="range"
+                            min="0.10"
+                            max="0.90"
+                            step="0.05"
+                            value={selectedModel.nmsThreshold || 0.45}
+                            onChange={(e) => handleUpdateModelSettings('nmsThreshold', parseFloat(e.target.value))}
+                            className="form-slider"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="form-group mt-3">
+                        <label className="form-label">Model Reasoning Instructions (Appended to Prompts)</label>
+                        <textarea 
+                          rows={2}
+                          value={selectedModel.instructions || ''}
+                          onChange={(e) => handleUpdateModelSettings('instructions', e.target.value)}
+                          placeholder="E.g. Focus specifically on rooftop geometry and calculate estimated square meters..."
+                          className="form-textarea-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Detected Checkpoint Files */}
+                    <div className="detail-section pt-3 border-t border-border-subtle">
+                      <h4 className="detail-subheading flex items-center justify-between">
+                        <span>
+                          <HardDrive size={14} className="text-blue-400 inline mr-1.5" />
+                          Detected Checkpoint Weights & Config Files ({selectedModel.files?.length || 0})
+                        </span>
+                        <span className="text-xs text-muted font-normal font-mono">{selectedModel.size}</span>
+                      </h4>
+                      <div className="files-pill-container mt-2">
+                        {(selectedModel.files || []).map((file, idx) => (
+                          <div key={idx} className={`file-badge file-${file.type}`}>
+                            <FileCode size={13} />
+                            <span className="file-name">{file.name}</span>
+                            <span className="file-size">{file.size}</span>
+                            <span className="file-type-tag">{file.type}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Tunable Inference Parameters */}
-              <div className="detail-section">
-                <h4 className="detail-subheading">
-                  <Sliders size={14} className="text-blue-400 inline mr-1.5" />
-                  Inference Tuning & Hardware Acceleration
-                </h4>
-
-                <div className="settings-form-grid">
-                  <div className="form-group">
-                    <label className="form-label">Target Capability / Task</label>
-                    <select 
-                      value={selectedModel.task}
-                      onChange={(e) => handleUpdateModelSettings('task', e.target.value)}
-                      className="form-select-sm"
-                    >
-                      <option value="Object Detection">Object Detection (Buildings, Ships, Solar Panels)</option>
-                      <option value="Semantic Segmentation">Semantic Segmentation (Water Bodies, Canopy, Urban)</option>
-                      <option value="Land Cover Classification">Land Cover & Spectral Classification (LULC)</option>
-                      <option value="SAR Marine Target Detection">SAR Marine Target & Vessel Detection</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Acceleration Device</label>
-                    <select 
-                      value={selectedModel.device}
-                      onChange={(e) => handleUpdateModelSettings('device', e.target.value)}
-                      className="form-select-sm"
-                    >
-                      <option value="WebGPU (Direct Tensor Core)">WebGPU (Direct Hardware Acceleration)</option>
-                      <option value="CUDA Local Daemon">CUDA Local GPU Daemon</option>
-                      <option value="WASM CPU Multithreaded">WASM CPU (Universal Fallback)</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <div className="flex justify-between text-xs mb-1">
-                      <label className="form-label mb-0">Confidence Threshold</label>
-                      <span className="font-mono text-cyan-400">
-                        {Math.round((selectedModel.confidenceThreshold || 0.5) * 100)}%
-                      </span>
-                    </div>
-                    <input 
-                      type="range"
-                      min="0.10"
-                      max="0.95"
-                      step="0.05"
-                      value={selectedModel.confidenceThreshold || 0.5}
-                      onChange={(e) => handleUpdateModelSettings('confidenceThreshold', parseFloat(e.target.value))}
-                      className="form-slider"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <div className="flex justify-between text-xs mb-1">
-                      <label className="form-label mb-0">NMS IoU Threshold</label>
-                      <span className="font-mono text-cyan-400">
-                        {Math.round((selectedModel.nmsThreshold || 0.45) * 100)}%
-                      </span>
-                    </div>
-                    <input 
-                      type="range"
-                      min="0.10"
-                      max="0.90"
-                      step="0.05"
-                      value={selectedModel.nmsThreshold || 0.45}
-                      onChange={(e) => handleUpdateModelSettings('nmsThreshold', parseFloat(e.target.value))}
-                      className="form-slider"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group mt-3">
-                  <label className="form-label">Model Reasoning Instructions (Appended to Prompts)</label>
-                  <textarea 
-                    rows={2}
-                    value={selectedModel.instructions || ''}
-                    onChange={(e) => handleUpdateModelSettings('instructions', e.target.value)}
-                    placeholder="E.g. Focus specifically on rooftop geometry and calculate estimated square meters..."
-                    className="form-textarea-sm"
-                  />
-                </div>
               </div>
 
               {/* Instant Test Execution */}
@@ -812,7 +819,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <h4 className="detail-subheading mb-0">
-                      <Play size={14} className="text-emerald-400 inline mr-1.5" />
+                      <Play size={14} className="text-blue-400 inline mr-1.5" />
                       Live Model Evaluation
                     </h4>
                     <p className="text-xs text-muted">Run zero-shot inference on the active satellite imagery.</p>

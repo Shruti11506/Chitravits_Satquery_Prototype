@@ -852,10 +852,14 @@
 }
 
 .checkpoints-expanded-panel {
-  padding: 16px 18px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
+  padding: 18px 20px;
+  background: var(--bg-card);
+  border: 1px solid rgba(59, 130, 246, 0.25);
   border-radius: var(--radius-md);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* Detail Section */
