@@ -181,10 +181,40 @@ export function setActiveModelId(id) {
   }
 }
 
+export function buildEnsembleModel(selectedModels) {
+  if (!selectedModels || selectedModels.length === 0) return null;
+  if (selectedModels.length === 1) return selectedModels[0];
+  const count = selectedModels.length;
+  return {
+    id: `multi:${selectedModels.map(m => m.id).join(',')}`,
+    name: `All Attached Models (${count} Active)`,
+    isMulti: true,
+    models: selectedModels,
+    task: 'Multi-Model Intelligence Pipeline',
+    taskCategory: 'ensemble',
+    format: 'Multi-Model Suite',
+    architecture: selectedModels.map(m => m.architecture?.split(' ')[0] || m.name).join(' + '),
+    size: `${count} models attached`,
+    precision: 'FP16 / Optimized',
+    confidenceThreshold: 0.50,
+    classes: Array.from(new Set(selectedModels.flatMap(m => m.classes || []))),
+    description: `Multi-model external attachment active with ${count} models: ${selectedModels.map(m => m.name).join(', ')}. Answers queries across urban detection, semantic segmentation, multispectral classification, and SAR radar.`,
+    isCustom: selectedModels.some(m => m.isCustom),
+    createdAt: new Date().toISOString()
+  };
+}
+
 export function getActiveModel() {
   const models = getStoredModels();
   const activeId = getActiveModelId();
   if (!activeId) return null;
+  if (typeof activeId === 'string' && activeId.startsWith('multi:')) {
+    const ids = activeId.replace('multi:', '').split(',').filter(Boolean);
+    const selected = models.filter(m => ids.includes(m.id));
+    if (selected.length > 0) {
+      return buildEnsembleModel(selected);
+    }
+  }
   return models.find(m => m.id === activeId) || models[0] || null;
 }
 

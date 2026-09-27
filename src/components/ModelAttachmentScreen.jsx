@@ -7,13 +7,15 @@ import {
 } from 'lucide-react';
 import { 
   getStoredModels, saveStoredModels, getActiveModelId, 
-  setActiveModelId, parseFolderFiles, runModelInference, formatBytes 
+  setActiveModelId, parseFolderFiles, runModelInference, formatBytes,
+  buildEnsembleModel
 } from '../lib/modelsStorage';
 
 export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }) {
   const [models, setModels] = useState([]);
   const [currentActiveId, setCurrentActiveId] = useState(activeModelId || null);
   const [selectedModel, setSelectedModel] = useState(null);
+  const [selectedModelIds, setSelectedModelIds] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -29,6 +31,14 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
     setModels(loaded);
     const active = activeModelId || getActiveModelId();
     setCurrentActiveId(active);
+    if (active && typeof active === 'string' && active.startsWith('multi:')) {
+      const ids = active.replace('multi:', '').split(',').filter(Boolean);
+      setSelectedModelIds(ids);
+    } else if (active) {
+      setSelectedModelIds([active]);
+    } else {
+      setSelectedModelIds(loaded.map(m => m.id));
+    }
     const initialSelected = loaded.find(m => m.id === active) || loaded[0] || null;
     setSelectedModel(initialSelected);
   }, [activeModelId]);
@@ -41,6 +51,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
   const handleActivateModel = (modelId) => {
     setCurrentActiveId(modelId);
     setActiveModelId(modelId);
+    setSelectedModelIds([modelId]);
     const model = models.find(m => m.id === modelId);
     onSelectModel?.(model);
     showToast(`"${model?.name}" is now active and will answer questions in chat.`);
@@ -51,6 +62,58 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
     setActiveModelId(null);
     onSelectModel?.(null);
     showToast('Custom model deactivated. Default SatQuery reasoning engine active.');
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedModelIds.length === models.length) {
+      setSelectedModelIds([]);
+    } else {
+      setSelectedModelIds(models.map(m => m.id));
+    }
+  };
+
+  const handleToggleSelectModel = (modelId, e) => {
+    e?.stopPropagation();
+    setSelectedModelIds(prev => 
+      prev.includes(modelId) ? prev.filter(id => id !== modelId) : [...prev, modelId]
+    );
+  };
+
+  const handleActivateSelectedForQueries = () => {
+    if (selectedModelIds.length === 0) {
+      showToast('Please select at least one model to activate for queries.');
+      return;
+    }
+    const chosenModels = models.filter(m => selectedModelIds.includes(m.id));
+    if (chosenModels.length === 1) {
+      handleActivateModel(chosenModels[0].id);
+    } else {
+      const ensemble = buildEnsembleModel(chosenModels);
+      setCurrentActiveId(ensemble.id);
+      setActiveModelId(ensemble.id);
+      onSelectModel?.(ensemble);
+      showToast(`All ${chosenModels.length} models attached as external model attachment! Active for chat queries.`);
+    }
+  };
+
+  const isModelActive = (modelId) => {
+    if (!currentActiveId) return false;
+    if (currentActiveId === modelId) return true;
+    if (typeof currentActiveId === 'string' && currentActiveId.startsWith('multi:')) {
+      const ids = currentActiveId.replace('multi:', '').split(',').filter(Boolean);
+      return ids.includes(modelId);
+    }
+    return false;
+  };
+
+  const areSelectedModelsActive = () => {
+    if (!currentActiveId || selectedModelIds.length === 0) return false;
+    if (selectedModelIds.length === 1) return currentActiveId === selectedModelIds[0];
+    if (typeof currentActiveId === 'string' && currentActiveId.startsWith('multi:')) {
+      const activeIds = currentActiveId.replace('multi:', '').split(',').filter(Boolean);
+      return selectedModelIds.length === activeIds.length && selectedModelIds.every(id => activeIds.includes(id));
+    }
+    return false;
   };
 
   // Traverse dropped directory items recursively
@@ -338,18 +401,73 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
               <span className="text-xs text-muted">{models.length} Models Available</span>
             </div>
 
+            {/* Batch Controls: Select All & Active for Queries */}
+            <div className="model-library-batch-bar">
+              <label 
+                className="batch-select-label"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input 
+                  type="checkbox"
+                  checked={models.length > 0 && selectedModelIds.length === models.length}
+                  onChange={handleToggleSelectAll}
+                  className="batch-checkbox"
+                />
+                <span className="batch-select-text">
+                  Select All <span className="batch-count">({selectedModelIds.length}/{models.length})</span>
+                </span>
+              </label>
+
+              <button
+                type="button"
+                onClick={handleActivateSelectedForQueries}
+                disabled={selectedModelIds.length === 0}
+                className={`btn-active-for-queries ${areSelectedModelsActive() ? 'is-active' : ''}`}
+                title={
+                  selectedModelIds.length === 0
+                    ? "Select models to activate for queries"
+                    : `Attach ${selectedModelIds.length} model(s) as external model attachment for chat queries`
+                }
+              >
+                {areSelectedModelsActive() ? (
+                  <>
+                    <CheckCircle2 size={14} className="text-emerald-400" />
+                    <span>Active for Queries ({selectedModelIds.length})</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap size={14} />
+                    <span>Active for Queries</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <div className="model-card-list">
               {models.map((model) => {
-                const isActive = currentActiveId === model.id;
-                const isSelected = selectedModel?.id === model.id;
+                const isActive = isModelActive(model.id);
+                const isSelectedInBatch = selectedModelIds.includes(model.id);
+                const isDetailSelected = selectedModel?.id === model.id;
 
                 return (
                   <div 
                     key={model.id}
                     onClick={() => setSelectedModel(model)}
-                    className={`model-list-card ${isSelected ? 'selected' : ''} ${isActive ? 'active-model' : ''}`}
+                    className={`model-list-card ${isDetailSelected ? 'selected' : ''} ${isActive ? 'active-model' : ''}`}
                   >
                     <div className="card-top">
+                      <div 
+                        className="model-card-check-wrap"
+                        onClick={(e) => handleToggleSelectModel(model.id, e)}
+                        title={isSelectedInBatch ? "Uncheck model" : "Check model for batch queries"}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelectedInBatch}
+                          onChange={(e) => handleToggleSelectModel(model.id, e)}
+                          className="model-card-checkbox"
+                        />
+                      </div>
                       <div className="model-icon-badge">
                         <Cpu size={18} className={isActive ? 'text-emerald-400' : 'text-blue-400'} />
                       </div>
@@ -381,6 +499,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                           <button 
                             onClick={(e) => { e.stopPropagation(); handleDeactivateModel(); }}
                             className="btn btn-xs btn-active-toggle"
+                            title="Deactivate this model from queries"
                           >
                             <Check size={12} /> Active
                           </button>
@@ -388,6 +507,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                           <button 
                             onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
                             className="btn btn-xs btn-secondary"
+                            title="Set this model as active for queries"
                           >
                             Set Active
                           </button>
@@ -423,7 +543,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {currentActiveId === selectedModel.id ? (
+                  {isModelActive(selectedModel.id) ? (
                     <button 
                       onClick={handleDeactivateModel}
                       className="btn btn-sm btn-active-luminous"

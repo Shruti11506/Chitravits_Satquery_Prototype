@@ -138,21 +138,43 @@ export function Workspace({
     if (activeModel && query) {
       setIsTyping(true);
       setTimeout(() => {
-        const inf = runModelInference(activeModel, query, { opticalImg: activeViewerImage });
-        const customModelMsg = {
-          id: `ai-model-${Date.now()}`,
-          sender: 'ai',
-          taskType: `${activeModel.name} (${activeModel.task})`,
-          text: `[Attached Custom Model Inference — ${activeModel.name}]\n${inf.summary}`,
-          isCustomModel: true,
-          modelResult: inf,
-          confidence: Math.round((activeModel.confidenceThreshold || 0.5) * 100),
-          status: 'completed',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          evidenceThumb: attachmentPayload?.previewUrl || activeViewerImage
-        };
-        setMessages(prev => [...prev, customModelMsg]);
-        setIsTyping(false);
+        if (activeModel.isMulti && Array.isArray(activeModel.models) && activeModel.models.length > 0) {
+          activeModel.models.forEach((m, idx) => {
+            setTimeout(() => {
+              const inf = runModelInference(m, query, { opticalImg: activeViewerImage });
+              const customModelMsg = {
+                id: `ai-model-${Date.now()}-${m.id}-${idx}`,
+                sender: 'ai',
+                taskType: `${m.name} (${m.task})`,
+                text: `[Attached External Model: ${m.name}]\n${inf.summary}`,
+                isCustomModel: true,
+                modelResult: inf,
+                confidence: Math.round((m.confidenceThreshold || 0.5) * 100),
+                status: 'completed',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                evidenceThumb: attachmentPayload?.previewUrl || activeViewerImage
+              };
+              setMessages(prev => [...prev, customModelMsg]);
+            }, idx * 120);
+          });
+          setIsTyping(false);
+        } else {
+          const inf = runModelInference(activeModel, query, { opticalImg: activeViewerImage });
+          const customModelMsg = {
+            id: `ai-model-${Date.now()}`,
+            sender: 'ai',
+            taskType: `${activeModel.name} (${activeModel.task})`,
+            text: `[Attached Custom Model Inference — ${activeModel.name}]\n${inf.summary}`,
+            isCustomModel: true,
+            modelResult: inf,
+            confidence: Math.round((activeModel.confidenceThreshold || 0.5) * 100),
+            status: 'completed',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            evidenceThumb: attachmentPayload?.previewUrl || activeViewerImage
+          };
+          setMessages(prev => [...prev, customModelMsg]);
+          setIsTyping(false);
+        }
       }, 450);
     }
 
