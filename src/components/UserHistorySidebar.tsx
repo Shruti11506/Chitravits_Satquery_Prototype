@@ -392,10 +392,8 @@ export function UserHistorySidebar({
   const dismissSidebar = React.useCallback(() => {
     if (isMobile) {
       setOpenMobile(false)
-    } else {
-      setOpen(false)
     }
-  }, [isMobile, setOpenMobile, setOpen])
+  }, [isMobile, setOpenMobile])
 
   const [isProfileMenuOpen, setIsProfileMenuOpen] = React.useState(false)
   const profileTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -693,7 +691,7 @@ export function UserHistorySidebar({
       </SidebarContent>
 
       {/* Footer: User Profile */}
-      <SidebarFooter className="p-3 border-t border-sidebar-border/60 group-data-[collapsible=icon]:p-1.5">
+      <SidebarFooter className="p-3 border-t border-sidebar-border/60 mt-auto group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:pb-4">
         <SidebarMenu className="gap-1">
           <SidebarMenuItem>
             <div className="relative">
