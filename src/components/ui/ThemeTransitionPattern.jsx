@@ -93,6 +93,8 @@ function EdgeSatelliteCraft({
 export function ThemeTransitionWave({ wave }) {
   if (!wave || typeof document === 'undefined') return null;
 
+  const dialogRef = React.useRef(null);
+
   const isDarkTarget = wave.nextTheme === 'dark';
   const primaryColor = isDarkTarget ? '#38bdf8' : '#0284c7';
   const secondaryColor = isDarkTarget ? '#60a5fa' : '#1d4ed8';
@@ -102,34 +104,64 @@ export function ThemeTransitionWave({ wave }) {
   const ey = wave.y;
   const maxR = wave.maxRadius || 2400;
 
-  const content = (
-    <div
-      ref={(el) => {
-        if (el) {
-          try {
-            if (typeof el.showPopover === 'function' && !el.matches(':popover-open')) {
-              el.showPopover();
-            }
-          } catch {}
+  // Ensure top-layer promotion immediately on mount and keep active
+  React.useEffect(() => {
+    const el = dialogRef.current;
+    if (!el) return;
+
+    try {
+      if (typeof el.showModal === 'function' && !el.open) {
+        el.showModal();
+      }
+    } catch {
+      try {
+        if (typeof el.showPopover === 'function' && !el.matches?.(':popover-open')) {
+          el.showPopover();
         }
-      }}
-      popover="manual"
+      } catch {}
+    }
+
+    return () => {
+      try {
+        if (typeof el.close === 'function' && el.open) {
+          el.close();
+        }
+      } catch {}
+      try {
+        if (typeof el.hidePopover === 'function' && el.matches?.(':popover-open')) {
+          el.hidePopover();
+        }
+      } catch {}
+    };
+  }, []);
+
+  const content = (
+    <dialog
+      ref={dialogRef}
       id="satquery-orbit-overlay"
       className="theme-wave-overlay"
+      popover="manual"
+      aria-hidden="true"
+      onCancel={(e) => e.preventDefault()}
       style={{
         position: 'fixed',
         inset: 0,
+        top: 0,
+        left: 0,
         width: '100vw',
         height: '100vh',
+        maxWidth: 'none',
+        maxHeight: 'none',
         margin: 0,
         padding: 0,
         border: 'none',
+        outline: 'none',
         background: 'transparent',
         pointerEvents: 'none',
         zIndex: 2147483647,
-        overflow: 'hidden'
+        overflow: 'hidden',
+        display: 'block'
       }}
-      aria-hidden="true"
     >
       <svg 
         width="100%" 
@@ -296,7 +328,7 @@ export function ThemeTransitionWave({ wave }) {
           </g>
         </g>
       </svg>
-    </div>
+    </dialog>
   );
 
   return ReactDOM.createPortal(content, document.body);

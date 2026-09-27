@@ -1177,3 +1177,413 @@
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-secondary);
 }
+
+/* ==========================================================================
+   LIGHT MODE OVERRIDES FOR MODEL ATTACHMENT & PROJECTS MODULE
+   Ensures WCAG AAA contrast, darkened typography, and crisp card borders
+   ========================================================================== */
+[data-theme="light"] .screen-title {
+  color: #020617;
+}
+
+[data-theme="light"] .screen-subtitle {
+  color: #334155;
+  font-weight: 500;
+}
+
+[data-theme="light"] .screen-subtitle code {
+  background: #e2e8f0;
+  color: #0369a1;
+  border: 1px solid #cbd5e1;
+  font-weight: 600;
+}
+
+[data-theme="light"] .inactive-status-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+/* Dropzone */
+[data-theme="light"] .model-dropzone {
+  background: #ffffff;
+  border-color: #93c5fd;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .model-dropzone:hover {
+  background: #f8fafc;
+  border-color: #2563eb;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12);
+}
+
+[data-theme="light"] .dropzone-heading {
+  color: #020617;
+}
+
+[data-theme="light"] .dropzone-desc {
+  color: #334155;
+}
+
+[data-theme="light"] .format-tag {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+/* Model Cards */
+[data-theme="light"] .section-title {
+  color: #020617;
+}
+
+[data-theme="light"] .model-list-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .model-list-card:hover {
+  background: #f8fafc;
+  border-color: #3b82f6;
+}
+
+[data-theme="light"] .model-list-card.selected {
+  background: #eff6ff;
+  border-color: #2563eb;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.12);
+}
+
+[data-theme="light"] .model-name {
+  color: #020617;
+}
+
+[data-theme="light"] .model-task {
+  color: #334155;
+  font-weight: 500;
+}
+
+[data-theme="light"] .badge-pill-custom {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border-color: #d8b4fe;
+  font-weight: 600;
+}
+
+[data-theme="light"] .model-list-card .card-bottom {
+  border-top-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .specs-row {
+  color: #334155;
+  font-weight: 500;
+}
+
+[data-theme="light"] .specs-row strong {
+  color: #020617;
+}
+
+/* Detail Panel / Inspector */
+[data-theme="light"] .model-detail-panel {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="light"] .panel-title {
+  color: #020617;
+}
+
+[data-theme="light"] .panel-desc {
+  color: #334155;
+}
+
+[data-theme="light"] .spec-card {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .spec-label {
+  color: #334155;
+  font-weight: 700;
+}
+
+[data-theme="light"] .spec-value {
+  color: #020617;
+  font-weight: 700;
+}
+
+[data-theme="light"] .detail-subheading {
+  color: #020617;
+}
+
+[data-theme="light"] .file-badge {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+[data-theme="light"] .file-badge.file-weights {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+[data-theme="light"] .file-badge.file-config {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #047857;
+  font-weight: 600;
+}
+
+[data-theme="light"] .file-badge.file-labels {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+  font-weight: 600;
+}
+
+[data-theme="light"] .file-name {
+  color: #0f172a;
+}
+
+[data-theme="light"] .file-size {
+  color: #475569;
+}
+
+[data-theme="light"] .file-type-tag {
+  background: #e2e8f0;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+[data-theme="light"] .form-label {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .form-select-sm,
+[data-theme="light"] .form-input,
+[data-theme="light"] .form-textarea-sm,
+[data-theme="light"] .form-textarea-instructions {
+  background: #ffffff;
+  border-color: #94a3b8;
+  color: #020617;
+  font-weight: 500;
+}
+
+[data-theme="light"] .form-select-sm:focus,
+[data-theme="light"] .form-input:focus,
+[data-theme="light"] .form-textarea-sm:focus,
+[data-theme="light"] .form-textarea-instructions:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+[data-theme="light"] .test-result-box {
+  background: #f8fafc;
+  border-color: #86efac;
+}
+
+[data-theme="light"] .telemetry-stat {
+  color: #334155;
+}
+
+[data-theme="light"] .telemetry-stat strong {
+  color: #020617;
+}
+
+[data-theme="light"] .test-summary {
+  color: #0f172a;
+}
+
+[data-theme="light"] .detection-item {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .detection-label {
+  color: #020617;
+}
+
+[data-theme="light"] .detection-confidence {
+  color: #0284c7;
+  font-weight: 700;
+}
+
+/* Projects View */
+[data-theme="light"] .projects-search-bar .search-input {
+  background: #ffffff;
+  border-color: #94a3b8;
+  color: #020617;
+}
+
+[data-theme="light"] .projects-search-bar .search-icon {
+  color: #475569;
+}
+
+[data-theme="light"] .project-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .project-card:hover {
+  background: #ffffff;
+  border-color: #3b82f6;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .project-title {
+  color: #020617;
+}
+
+[data-theme="light"] .project-desc {
+  color: #334155;
+}
+
+[data-theme="light"] .meta-badge {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .badge-has-instructions {
+  background: #f3e8ff;
+  border-color: #d8b4fe;
+  color: #6b21a8;
+  font-weight: 600;
+}
+
+[data-theme="light"] .project-card .card-footer {
+  border-top-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .btn-icon-subtle {
+  color: #334155;
+}
+
+[data-theme="light"] .btn-icon-subtle:hover {
+  background: #e2e8f0;
+  color: #020617;
+}
+
+[data-theme="light"] .create-new-card {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+[data-theme="light"] .create-new-card:hover {
+  background: #f1f5f9;
+  border-color: #2563eb;
+}
+
+[data-theme="light"] .plus-icon-circle {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+/* Tabs */
+[data-theme="light"] .project-tab-btn {
+  color: #334155;
+  font-weight: 600;
+}
+
+[data-theme="light"] .project-tab-btn:hover {
+  color: #020617;
+  background: #e2e8f0;
+}
+
+[data-theme="light"] .project-tab-btn.active {
+  color: #1e40af;
+  background: #dbeafe;
+  font-weight: 700;
+  border: 1px solid #bfdbfe;
+}
+
+[data-theme="light"] .tab-dot-active {
+  background: #2563eb;
+}
+
+[data-theme="light"] .project-tab-content {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+}
+
+[data-theme="light"] .tab-heading {
+  color: #020617;
+}
+
+[data-theme="light"] .tab-sub {
+  color: #334155;
+}
+
+[data-theme="light"] .project-chat-row {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .project-chat-row:hover {
+  background: #f1f5f9;
+  border-color: #3b82f6;
+}
+
+[data-theme="light"] .chat-row-title {
+  color: #020617;
+}
+
+[data-theme="light"] .chat-row-meta {
+  color: #475569;
+}
+
+[data-theme="light"] .instructions-card {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .knowledge-file-card {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .file-title {
+  color: #020617;
+}
+
+[data-theme="light"] .file-meta {
+  color: #475569;
+}
+
+/* Modals */
+[data-theme="light"] .modal-backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+[data-theme="light"] .modal-content {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  color: #020617;
+}
+
+[data-theme="light"] .modal-title {
+  color: #020617;
+}
+
+[data-theme="light"] .modal-footer {
+  background: #f8fafc;
+  border-top-color: #e2e8f0;
+}
+
+[data-theme="light"] .emoji-btn {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+

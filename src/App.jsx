@@ -18,7 +18,7 @@ import { executeThemeTransition } from './lib/themeTransition';
 import { ThemeTransitionWave } from './components/ui/ThemeTransitionPattern';
 import { GradientBackground } from './components/ui/oceanic-shimmer';
 import { SATELLITE_SCENARIOS } from './data/mockData';
-import { SidebarProvider, SidebarTrigger, SidebarInset } from './components/ui/sidebar';
+import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from './components/ui/sidebar';
 import { UserHistorySidebar } from './components/UserHistorySidebar';
 import { getActiveModel, setActiveModelId } from './lib/modelsStorage';
 import { getActiveProjectId, setActiveProjectId } from './lib/projectsStorage';
@@ -211,6 +211,85 @@ function buildLegacyScenario(imagery, historyItemsForImage = []) {
     uploadedFile: attachmentFromImagery(imagery),
     chatHistory
   };
+}
+
+function AppHeader({ theme, toggleTheme, activeScreen, handleNewChat, onGoBack }) {
+  const { open } = useSidebar();
+
+  return (
+    <header className="minimal-header">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        {/* Prominent Back Button on Top Left for every window other than landing */}
+        {activeScreen !== 'landing' && (
+          <button
+            id="satquery-header-back-btn"
+            className="btn-header-back"
+            onClick={onGoBack}
+            title="Go back to previous screen"
+          >
+            <ArrowLeft size={18} />
+            <span>Back</span>
+          </button>
+        )}
+
+        {/* Sidebar Trigger Tab and Brand Logo/Title */}
+        {!open && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} className="animate-in fade-in duration-200">
+            <SidebarTrigger
+              className="sidebar-tab-trigger-btn"
+              title="Open History Sidebar"
+            />
+            <div 
+              className="brand-section" 
+              onClick={handleNewChat}
+              title="SatQuery AI - New Analysis"
+              style={{ cursor: 'pointer', padding: '4px 8px' }}
+            >
+              <div className="brand-logo-badge" style={{ width: 46, height: 46, padding: 3 }}>
+                <ChitravitsEmblem size={38} />
+              </div>
+              <span className="brand-title" style={{ fontSize: '1.32rem', fontWeight: 700, letterSpacing: '-0.025em' }}>
+                Sat<span className="brand-title-accent">Query</span> <span className="brand-title-ai" style={{ fontSize: '0.76rem', padding: '2.5px 8px', marginLeft: 6 }}>AI</span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Clean Screen Title for Context */}
+        {activeScreen !== 'landing' && (
+          <span style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'capitalize', letterSpacing: '-0.015em' }}>
+            / {activeScreen.replace('-', ' ')}
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button 
+          id="satquery-theme-toggle-btn"
+          className="theme-toggle-btn"
+          style={{ width: 46, height: 46 }}
+          onClick={toggleTheme}
+          title={`Switch to ${theme === 'dark' ? 'Light Theme' : 'Dark Theme'}`}
+          aria-label="Toggle theme"
+        >
+          {theme === 'dark' ? <Sun size={22} /> : <Moon size={22} />}
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function SidebarBackdrop() {
+  const { open, setOpen } = useSidebar();
+  if (!open) return null;
+  return (
+    <div 
+      className="sidebar-backdrop-overlay" 
+      onClick={() => setOpen(false)}
+      title="Tap to shrink and slide sidebar"
+      aria-label="Close sidebar"
+    />
+  );
 }
 
 export function App() {
@@ -768,6 +847,9 @@ export function App() {
       />
 
       <SidebarInset className="flex-1 flex flex-col min-w-0 min-h-screen relative overflow-x-hidden bg-transparent">
+          {/* Smooth Backdrop for tapping on screen to shrink/close sidebar */}
+          <SidebarBackdrop />
+
           {/* Dynamic Ambient Background: Synchronized 60fps hardware-accelerated cross-fade */}
           <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
             <div 
@@ -794,61 +876,14 @@ export function App() {
             </div>
           </div>
 
-          {/* Minimalist Header: SatQuery AI Logo + Sidebar Trigger + Back Option + New Analysis + Theme Toggle */}
-          <header className="minimal-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <SidebarTrigger className="hover:bg-sidebar-accent rounded-lg p-1.5 transition-colors cursor-pointer" title="Toggle History Sidebar" />
-              <div 
-                className="brand-section" 
-                onClick={handleNewChat}
-                title="SatQuery AI"
-                style={{ cursor: 'pointer' }}
-              >
-                <div className="brand-logo-badge">
-                  <ChitravitsEmblem size={44} />
-                </div>
-                <span className="brand-title">
-                  Sat<span className="brand-title-accent">Query</span> <span className="brand-title-ai">AI</span>
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {activeScreen !== 'landing' && (
-                <>
-                  <button 
-                    className="btn btn-secondary btn-back-nav"
-                    style={{ padding: '6px 14px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                    onClick={handleGoBack}
-                    title="Go back to previous screen"
-                  >
-                    <ArrowLeft size={14} />
-                    <span>Back</span>
-                  </button>
-
-                  <button 
-                    className="btn btn-secondary"
-                    style={{ padding: '6px 14px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                    onClick={handleNewChat}
-                    title="Upload another satellite scene"
-                  >
-                    <Plus size={14} />
-                    <span>New Analysis</span>
-                  </button>
-                </>
-              )}
-
-              <button 
-                id="satquery-theme-toggle-btn"
-                className="theme-toggle-btn"
-                onClick={toggleTheme}
-                title={`Switch to ${theme === 'dark' ? 'Light Theme' : 'Dark Theme'}`}
-                aria-label="Toggle theme"
-              >
-                {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-              </button>
-            </div>
-          </header>
+          {/* Minimalist Header without duplicate sidebar or duplicate action buttons */}
+          <AppHeader 
+            theme={theme}
+            toggleTheme={toggleTheme}
+            activeScreen={activeScreen}
+            handleNewChat={handleNewChat}
+            onGoBack={handleGoBack}
+          />
 
           {/* Screen Routing with Step-by-Step Back Option */}
           <main style={{ flex: 1, position: 'relative', zIndex: 1 }}>

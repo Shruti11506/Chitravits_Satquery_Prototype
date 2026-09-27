@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileUp, Sparkles, ArrowRight, CheckCircle2,
-  Satellite, Layers, Database, Compass, X
+  Satellite, Layers, Database, Compass, X, Search
 } from 'lucide-react';
 import { ChitravitsEmblem } from './ui/ChitravitsLogo';
 import { SUGGESTED_QUERIES } from '../data/mockData';
@@ -194,9 +194,7 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
     if (!isMountedRef.current) return;
     setUploadedFile(filePayload);
     setIsValidating(false);
-    // Only a query the user actually typed is submitted; an upload alone
-    // opens the chat and waits for the first question.
-    onStartAnalysis(prompt, filePayload);
+    // User remains on the landing page to enter their query; redirection happens only when Analyze is clicked.
   };
 
   const selectPairFile = (position, file) => {
@@ -280,19 +278,22 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
       return;
     }
     if (!prompt.trim() && !uploadedFile) return;
-    onStartAnalysis(prompt, uploadedFile);
+    onStartAnalysis(prompt.trim() || 'Analyze this satellite scene and identify key geospatial features', uploadedFile);
   };
 
   return (
     <div className="landing-hero">
       {/* Main Hero Headline */}
       <h1 className="hero-tagline">
-        Analyze Earth.<br />
+        Analyze Earth Imagery.<br />
         <span className="highlight-crossfade">
           <span className="highlight-light">Ask in Natural Language.</span>
           <span className="highlight-dark">Ask in Natural Language.</span>
         </span>
       </h1>
+      <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', maxWidth: 620, margin: '-4px auto 22px', lineHeight: 1.5, textAlign: 'center' }}>
+        Enterprise remote sensing vision-language intelligence for multi-sensor satellite imagery.
+      </p>
 
       {/* Active Model / Project Pill Indicators */}
       {(activeModel || activeProject) && (
@@ -383,20 +384,50 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
             <p style={{ color: 'var(--accent)', fontWeight: 600 }}>Parsing GeoTIFF Metadata & Georeferencing Bounds...</p>
           </div>
         ) : uploadedFile ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            <div className="dropzone-icon-box" style={{ borderColor: 'var(--color-success)', color: 'var(--color-success)' }}>
-              <CheckCircle2 size={32} />
+          <div 
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '8px 16px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="dropzone-icon-box" style={{ borderColor: 'var(--color-success)', color: 'var(--color-success)', width: 50, height: 50 }}>
+              <CheckCircle2 size={28} />
             </div>
-            <h3 style={{ fontSize: '1.1rem' }}>{uploadedFile.name}</h3>
+            <div style={{ textAlign: 'center' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>
+                {uploadedFile.name}
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Size: {uploadedFile.size} • <span style={{ color: '#10b981', fontWeight: 600 }}>Image Selected — type your query below and click Analyze</span>
+              </p>
+            </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
               <span className="badge badge-geotiff">{uploadedFile.name?.split('.').pop()?.toUpperCase() || 'FILE'}</span>
               {uploadedFile.sensor && <span className="badge badge-optical">{uploadedFile.sensor}</span>}
               {uploadedFile.crs && <span className="badge badge-high">{uploadedFile.crs}</span>}
-              {!uploadedFile.imageryId && <span className="badge" title="Backend upload failed">Not saved to backend</span>}
             </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Size: {uploadedFile.size} | Ready for conversational query
-            </p>
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  document.getElementById('satellite-file-input').click();
+                }}
+              >
+                Change Image
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '6px 14px', fontSize: '0.82rem', color: '#ef4444' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setUploadedFile(null);
+                }}
+              >
+                Remove
+              </button>
+            </div>
           </div>
         ) : (
           <div>
@@ -425,13 +456,41 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
       </div>
       )}
 
+      {/* Image Attached Indicator & Instruction */}
+      {uploadedFile && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: 10,
+          padding: '8px 16px',
+          borderRadius: 'var(--radius-full)',
+          background: 'rgba(16, 185, 129, 0.1)',
+          border: '1px solid rgba(16, 185, 129, 0.35)',
+          fontSize: '0.84rem',
+          color: 'var(--text-primary)',
+          maxWidth: '780px',
+          width: '100%',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
+        }}>
+          <CheckCircle2 size={16} style={{ color: '#10b981', flexShrink: 0 }} />
+          <span style={{ color: 'var(--text-muted)' }}>Attached:</span>
+          <strong style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {uploadedFile.name}
+          </strong>
+          <span style={{ fontSize: '0.78rem', color: '#10b981', marginLeft: 'auto', fontWeight: 600 }}>
+            Enter your prompt below & click Analyze
+          </span>
+        </div>
+      )}
+
       {/* Prompt Bar Input */}
       <div className="prompt-bar-wrapper" style={{ width: '100%', maxWidth: '780px', marginBottom: 'clamp(10px, 2vh, 20px)' }}>
         <div className="prompt-input-row">
-          <Sparkles size={20} style={{ color: 'var(--accent)', marginLeft: 8 }} />
+          <Search size={18} style={{ color: 'var(--text-muted)', marginLeft: 8, flexShrink: 0 }} />
           <textarea
             className="prompt-textarea"
-            placeholder="Ask anything in plain English (e.g. 'Highlight water bodies and calculate urban growth')..."
+            placeholder={uploadedFile ? "Ask your question about this satellite scene (e.g. 'Extract water bodies and assess urban growth')..." : "Ask anything in plain English (e.g. 'Highlight water bodies and calculate urban growth')..."}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
@@ -454,11 +513,11 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
 
       {/* Suggested Query Chips */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'clamp(6px, 1.2vh, 10px)' }}>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Suggested Remote Sensing Inquiries
+        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Suggested Inquiries
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 840 }}>
-          {SUGGESTED_QUERIES.map((q, idx) => (
+          {SUGGESTED_QUERIES.slice(0, 4).map((q, idx) => (
             <button 
               key={idx}
               className="query-chip"
@@ -466,7 +525,6 @@ export function LandingHero({ onStartAnalysis, onStartConversation, onImageryUpl
                 setPrompt(q);
               }}
             >
-              <Sparkles size={13} style={{ color: 'var(--accent)' }} />
               <span>{q}</span>
             </button>
           ))}
