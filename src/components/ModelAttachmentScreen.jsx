@@ -662,19 +662,19 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
               <div className="specs-grid">
                 <div className="spec-card">
                   <span className="spec-label">Architecture</span>
-                  <strong className="spec-value">{selectedModel.architecture}</strong>
-                </div>
-                <div className="spec-card">
-                  <span className="spec-label">Weight Size</span>
-                  <strong className="spec-value">{selectedModel.size}</strong>
-                </div>
-                <div className="spec-card">
-                  <span className="spec-label">Parameters</span>
-                  <strong className="spec-value">{selectedModel.parameters || 'N/A'}</strong>
+                  <strong className="spec-value" title={selectedModel.architecture}>{selectedModel.architecture}</strong>
                 </div>
                 <div className="spec-card">
                   <span className="spec-label">Format</span>
-                  <strong className="spec-value">{selectedModel.format}</strong>
+                  <strong className="spec-value" title={selectedModel.format}>{selectedModel.format}</strong>
+                </div>
+                <div className="spec-card">
+                  <span className="spec-label">Weight Size</span>
+                  <strong className="spec-value" title={selectedModel.size}>{selectedModel.size}</strong>
+                </div>
+                <div className="spec-card">
+                  <span className="spec-label">Parameters</span>
+                  <strong className="spec-value" title={selectedModel.parameters || 'N/A'}>{selectedModel.parameters || 'N/A'}</strong>
                 </div>
               </div>
 

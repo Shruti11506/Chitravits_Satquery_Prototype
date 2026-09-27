@@ -583,6 +583,9 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .model-list-card:hover {
@@ -691,17 +694,22 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px 12px;
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
   font-size: 0.72rem;
   color: var(--text-secondary);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .specs-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 6px 12px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .specs-row strong {
@@ -735,10 +743,14 @@
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 28px 32px;
+  padding: 24px 28px;
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 22px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .panel-header {
@@ -776,17 +788,19 @@
   gap: 6px;
 }
 
-/* Specs Grid */
+/* Specs Grid - 2 Column balanced grid ensuring elements never spill outside */
 .specs-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   margin: 4px 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-@media (max-width: 800px) {
+@media (max-width: 600px) {
   .specs-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
   }
 }
 
@@ -794,10 +808,13 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .spec-label {
@@ -808,13 +825,15 @@
 }
 
 .spec-value {
-  font-size: 0.94rem;
+  font-size: 0.92rem;
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+  display: block;
 }
 
 /* Checkpoints Accordion Toggle (See More) */
