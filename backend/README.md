@@ -59,15 +59,16 @@ Routes never talk to Supabase directly — they call a service function, which c
 backend/
 ├── app/
 │   ├── main.py              # FastAPI app, CORS, exception handlers, router wiring
-│   ├── api/routes/          # health, imagery, analysis, jobs, results, evidence
+│   ├── api/routes/          # health, imagery, analysis, jobs, results, evidence, validation, conversations, projects, profile, settings
+│   ├── validation/          # validation engine (change detection, modality, bands, dimensions, CRS, workflows)
 │   ├── schemas/             # Pydantic request/response models + the ApiResponse envelope
 │   ├── services/            # business logic, talks to Supabase via db/supabase.py
 │   ├── db/supabase.py       # single place the Supabase client is constructed
 │   └── core/                # config (env vars), logging, security (UUID validation), exceptions
-├── tests/                   # pytest suite, uses an in-memory fake Supabase client
+├── tests/                   # pytest suite (327 tests), in-memory fakes + regression tests
 ├── supabase/
-│   ├── schema.sql                          # DDL for all 5 tables (new projects)
-│   └── migrations/0002_imagery_upload_fields.sql  # upgrades an existing imagery table
+│   ├── schema.sql           # DDL for baseline tables (new projects)
+│   └── migrations/          # incremental migrations (0002 to 0008_projects.sql)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt

@@ -1,22 +1,57 @@
 # SatQuery AI
 
-React + Vite frontend and a FastAPI backend that stores conversations, uploads
-and queries in **Supabase** (PostgreSQL + Storage).
+Enterprise remote sensing vision-language intelligence platform for multi-sensor satellite imagery (Optical, Multispectral, and SAR).
+
+Combines a React + Vite frontend (Tailwind/Vanilla CSS aerospace dark theme) and a high-performance FastAPI backend integrated with **Supabase** (PostgreSQL + Storage) and **Rasterio/GDAL** for server-side geospatial raster inspection.
 
 ```
-Browser → frontend (Vite, :5173) → FastAPI backend (:8000) → Supabase project (shared)
+Browser → Frontend (Vite, :5173/:5174) → FastAPI Backend (:8000) → Supabase Cloud (PostgreSQL + Storage)
 ```
 
-Every developer runs the frontend **and** the backend on their own computer,
-and every backend connects to the **same Supabase project** — that's what makes
-everyone see the same conversations and history. The frontend never talks to
-Supabase directly and holds no Supabase keys.
+Every developer runs the frontend **and** the backend on their own computer, and every backend connects to the **same Supabase project** — synchronizing conversations, assets, projects, and analysis jobs. The frontend communicates exclusively with the FastAPI backend and never exposes Supabase keys.
 
-> `localhost` always means the computer the browser runs on. On a teammate's
-> machine the frontend talks to *their* local backend, never to yours — so each
-> machine needs its own backend running (steps below).
+---
 
-## First-time setup (fresh clone)
+## Key Features
+
+### 1. Multi-Sensor Satellite Imagery Ingestion
+- **GeoTIFF / TIFF / PNG / JPEG support**: Handles true multispectral and SAR satellite rasters as well as standard RGB images.
+- **Server-Side Raster Inspection**: Uses Rasterio and GDAL to extract real raster metadata: driver format, width/height dimensions, band counts, color interpretation, data types, affine geotransforms, bounds, and Coordinate Reference Systems (CRS).
+- **Fast Cloud Previews**: Dynamic generation of web-optimized PNG previews and thumbnails for GeoTIFFs stored in private Supabase buckets.
+
+### 2. Bi-Temporal Change Detection & Hard Validation Gate
+- **Hard Gate Architecture**: Validation is a mandatory pre-condition before any change detection analysis request is created, job queued, or active scene established.
+- **Strict Modality Rules**:
+  - `Optical + Optical` → **Valid**
+  - `Multispectral + Multispectral` → **Valid**
+  - `SAR VV + SAR VV` or `SAR VH + SAR VH` → **Valid**
+  - `SAR VV + SAR VH` → **Invalid** (`SAR_POLARIZATION_MISMATCH`)
+  - `Multispectral GeoTIFF + RGB JPEG` → **Invalid** (`IMAGE_TYPE_MISMATCH`)
+  - `Optical + SAR` → **Invalid** (`IMAGE_TYPE_MISMATCH`)
+- **Fail-Closed Modality Detection**: Any image with unknown modality immediately fails with `UNKNOWN_MODALITY`.
+- **Comprehensive Compatibility Checks**:
+  - **Band Consistency**: Required spectral bands must exist in both epochs.
+  - **Pixel Dimensions & Aspect Ratio**: Validates exact dimensions and aspect ratios within strict tolerances.
+  - **Geospatial & CRS Alignment**: Validates CRS matching between epochs without silent auto-reprojection.
+  - **Temporal & Observation Order**: Ensures T1 baseline precedes T2 target.
+- **Interactive Blocking Modal**: Incompatible pairs immediately trigger a dedicated dark-themed **Invalid Input** modal detailing Image 1 vs Image 2 attributes and resolution guidance, blocking model invocation and preventing active scene pollution.
+
+### 3. Projects & Workspaces
+- Group multi-turn analysis conversations and satellite imagery under scoped Projects.
+- Full CRUD API with persistence in Supabase PostgreSQL (`projects` table, migration `0008_projects.sql`).
+- Quick-filter workspaces, project badges, and persistent conversation assignments.
+
+### 4. Library & Asset Workspace
+- ChatGPT-inspired file and asset management with custom folder support.
+- Live metadata cards displaying sensor types, acquisition dates, file sizes, and band configurations.
+
+### 5. Custom Model Attachment & Edge Inference
+- Connect external models with configurable tasks (Segmentation, Detection, VQA).
+- Confidence thresholding, inference parameter tuning, and dual cloud + local model execution.
+
+---
+
+## First-Time Setup (Fresh Clone)
 
 Requirements: **Node.js 20+**, **Python 3.10+** (developed on 3.12), Git.
 
@@ -27,81 +62,59 @@ npm install
 npm run setup
 ```
 
-`npm run setup` creates `backend/.venv`, installs `backend/requirements.txt`,
-and creates `backend/.env` from `backend/.env.example` (an existing `.env` is
-never overwritten).
+`npm run setup` creates `backend/.venv`, installs `backend/requirements.txt`, and creates `backend/.env` from `backend/.env.example` (existing `.env` is never overwritten).
 
-Then open **`backend/.env`** and fill in the values for the shared Supabase
-project — from the Supabase dashboard (*Project Settings → API*) or from the
-project owner, shared privately (never through GitHub):
+Then open **`backend/.env`** and fill in your Supabase credentials:
 
-| Variable | Value |
+| Variable | Description |
 |---|---|
-| `SUPABASE_URL` | the project URL, `https://<ref>.supabase.co` |
-| `SUPABASE_SECRET_KEY` | the **secret** key (`sb_secret_…`) or legacy **service_role** key — *not* the publishable/anon key |
+| `SUPABASE_URL` | Project URL: `https://<ref>.supabase.co` |
+| `SUPABASE_SECRET_KEY` | Secret key (`sb_secret_…`) or `service_role` key (never publishable/anon) |
+| `SUPABASE_STORAGE_BUCKET` | Storage bucket name (defaults to `Satquery`) |
 
-Everything else in `backend/.env` can keep its default. `backend/.env` is
-gitignored; never commit it. No frontend `.env` is needed (see `.env.example`
-only if the backend runs somewhere other than `http://localhost:8000`).
+---
 
-## Run
+## Running the Application
 
 ```bash
 npm run dev
 ```
 
-This starts the Vite frontend **and** the FastAPI backend on
-`http://127.0.0.1:8000`. Open the URL Vite prints (normally
-http://localhost:5173). Stopping `npm run dev` stops both. After changing
-backend code, restart `npm run dev`.
+This concurrently launches:
+1. **FastAPI Backend**: `http://127.0.0.1:8000`
+2. **Vite Frontend**: `http://localhost:5173` (or `:5174` if `:5173` is busy)
 
-## Check it works
+Interactive Swagger API Documentation is available at:
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
 
-1. http://localhost:8000/api/v1/health → `"status": "healthy"` (backend is up).
-2. http://localhost:8000/api/v1/health/supabase → `"supabase": "connected"`.
-   `"not_configured"` means `backend/.env` is missing, still has the
-   placeholder values, or has the publishable key instead of the secret key —
-   the `message` says which.
-3. The app's sidebar lists the shared conversations. If it shows
-   *"Unable to load conversation history."*, the line under it says why
-   (backend not running, Supabase not configured, …).
+---
 
-API docs: http://localhost:8000/docs.
+## Health & Verification
 
-## Troubleshooting
+1. Backend Health: `http://localhost:8000/api/v1/health` → `{"status": "healthy"}`
+2. Supabase Connectivity: `http://localhost:8000/api/v1/health/supabase` → `{"supabase": "connected"}`
+3. Change Detection Validation API: `POST http://localhost:8000/api/v1/validation/change-detection`
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Sidebar: *Cannot reach the SatQuery backend at http://localhost:8000/api/v1* | Backend not running on this machine | `npm run setup` (first time), then restart `npm run dev`; the terminal shows `[satquery] Backend NOT started` if the venv is missing |
-| Sidebar: *Supabase is not configured …* | `backend/.env` missing or still has placeholders | Fill in `SUPABASE_URL` / `SUPABASE_SECRET_KEY`, restart `npm run dev` |
-| Sidebar: *SUPABASE_SECRET_KEY … is the publishable/anon key* | Wrong key pasted | Use the secret / service_role key |
-| *Image pairs / TIFF previews are not set up yet …* (503) | The shared database is missing a migration | Run the named file from `backend/supabase/migrations/` once in the Supabase SQL editor (already done for the shared project) |
+---
 
-## Backend without npm (optional)
+## Testing
 
+### Backend Unit & Regression Suite (327 tests)
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate            # Windows  (macOS/Linux: source .venv/bin/activate)
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+.venv\Scripts\python -m pytest -q      # Windows
+# source .venv/bin/activate && pytest -q  # macOS/Linux
 ```
 
-Or with Docker (reads `backend/.env` at run time; it is not baked into the image):
-
+### Frontend Production Build
 ```bash
-cd backend
-docker compose up --build
-```
-
-Then run the frontend alone with `SATQUERY_SKIP_BACKEND=1 npm run dev`.
-
-## Tests
-
-```bash
-cd backend && .venv\Scripts\python -m pytest -q      # macOS/Linux: .venv/bin/python -m pytest -q
 npm run build
 ```
 
-More detail: [backend/README.md](backend/README.md) (endpoints, storage,
-migrations) and [CLAUDE.md](CLAUDE.md) (architecture and project rules).
+---
+
+## Documentation Links
+
+- [Backend Foundation & Endpoints](backend/README.md)
+- [Architecture & Coding Standards](CLAUDE.md)
