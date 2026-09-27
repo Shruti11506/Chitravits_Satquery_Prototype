@@ -64,11 +64,36 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
     showToast('Custom model deactivated. Default SatQuery reasoning engine active.');
   };
 
-  const handleToggleSelectAll = () => {
-    if (selectedModelIds.length === models.length) {
-      setSelectedModelIds([]);
+  const handleDeactivateSingleModel = (modelId) => {
+    if (!currentActiveId) return;
+    if (currentActiveId === modelId) {
+      handleDeactivateModel();
+      return;
+    }
+    if (typeof currentActiveId === 'string' && currentActiveId.startsWith('multi:')) {
+      const ids = currentActiveId.replace('multi:', '').split(',').filter(Boolean);
+      const remainingIds = ids.filter(id => id !== modelId);
+      if (remainingIds.length === 0) {
+        handleDeactivateModel();
+      } else if (remainingIds.length === 1) {
+        handleActivateModel(remainingIds[0]);
+      } else {
+        const remainingModels = models.filter(m => remainingIds.includes(m.id));
+        const ensemble = buildEnsembleModel(remainingModels);
+        setCurrentActiveId(ensemble.id);
+        setActiveModelId(ensemble.id);
+        onSelectModel?.(ensemble);
+        showToast(`Model removed from active queries. ${remainingModels.length} model(s) still active.`);
+      }
+    }
+  };
+
+  const handleToggleSelectAllInactive = (inactiveIds) => {
+    const allSelected = inactiveIds.length > 0 && inactiveIds.every(id => selectedModelIds.includes(id));
+    if (allSelected) {
+      setSelectedModelIds(prev => prev.filter(id => !inactiveIds.includes(id)));
     } else {
-      setSelectedModelIds(models.map(m => m.id));
+      setSelectedModelIds(prev => Array.from(new Set([...prev, ...inactiveIds])));
     }
   };
 
@@ -81,10 +106,16 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
 
   const handleActivateSelectedForQueries = () => {
     if (selectedModelIds.length === 0) {
-      showToast('Please select at least one model to activate for queries.');
+      showToast('Please select at least one model on the left to activate for queries.');
       return;
     }
-    const chosenModels = models.filter(m => selectedModelIds.includes(m.id));
+    const currentActiveIds = typeof currentActiveId === 'string' && currentActiveId.startsWith('multi:')
+      ? currentActiveId.replace('multi:', '').split(',').filter(Boolean)
+      : currentActiveId ? [currentActiveId] : [];
+
+    const combinedIds = Array.from(new Set([...currentActiveIds, ...selectedModelIds]));
+    const chosenModels = models.filter(m => combinedIds.includes(m.id));
+
     if (chosenModels.length === 1) {
       handleActivateModel(chosenModels[0].id);
     } else {
@@ -92,6 +123,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
       setCurrentActiveId(ensemble.id);
       setActiveModelId(ensemble.id);
       onSelectModel?.(ensemble);
+      setSelectedModelIds([]);
       showToast(`All ${chosenModels.length} models attached as external model attachment! Active for chat queries.`);
     }
   };
@@ -254,6 +286,94 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
     }, 700);
   };
 
+  const activeModels = models.filter(m => isModelActive(m.id));
+  const inactiveModels = models.filter(m => !isModelActive(m.id));
+
+  const renderModelCard = (model, isActive) => {
+    const isSelectedInBatch = selectedModelIds.includes(model.id);
+    const isDetailSelected = selectedModel?.id === model.id;
+
+    return (
+      <div 
+        key={model.id}
+        onClick={() => setSelectedModel(model)}
+        className={`model-list-card ${isDetailSelected ? 'selected' : ''} ${isActive ? 'active-model' : ''}`}
+      >
+        <div className="card-top">
+          {!isActive && (
+            <div 
+              className="model-card-check-wrap"
+              onClick={(e) => handleToggleSelectModel(model.id, e)}
+              title={isSelectedInBatch ? "Uncheck model" : "Check model for batch queries"}
+            >
+              <input
+                type="checkbox"
+                checked={isSelectedInBatch}
+                onChange={(e) => handleToggleSelectModel(model.id, e)}
+                className="model-card-checkbox"
+              />
+            </div>
+          )}
+          <div className="model-icon-badge">
+            <Cpu size={18} className={isActive ? 'text-emerald-400' : 'text-blue-400'} />
+          </div>
+          <div className="model-meta">
+            <div className="flex items-center gap-2">
+              <h4 className="model-name">{model.name}</h4>
+              {isActive && (
+                <span className="badge-active-live">
+                  <span className="live-dot"></span> Active in Chat
+                </span>
+              )}
+              {model.isCustom && (
+                <span className="badge-pill badge-pill-custom">Custom</span>
+              )}
+            </div>
+            <p className="model-task">{model.task} • {model.architecture}</p>
+          </div>
+        </div>
+
+        <div className="card-bottom">
+          <div className="specs-row">
+            <span>Format: <strong>{model.format}</strong></span>
+            <span>Size: <strong>{model.size}</strong></span>
+            <span>Precision: <strong>{model.precision}</strong></span>
+          </div>
+
+          <div className="actions-row">
+            {isActive ? (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDeactivateSingleModel(model.id); }}
+                className="btn btn-xs btn-active-toggle"
+                title="Deactivate this model from queries (moves to left)"
+              >
+                <Check size={12} /> Active (Remove)
+              </button>
+            ) : (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
+                className="btn btn-xs btn-secondary"
+                title="Set this model as active for queries (moves to right)"
+              >
+                Set Active
+              </button>
+            )}
+
+            {model.isCustom && (
+              <button 
+                onClick={(e) => handleDeleteModel(model.id, e)}
+                className="btn btn-xs btn-ghost text-red-400 hover:text-red-300"
+                title="Remove attached model"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="model-attachment-screen">
       {/* Toast Notification */}
@@ -398,135 +518,81 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 <Boxes size={18} className="text-blue-400" />
                 <h3 className="section-title">Attached Models Library</h3>
               </div>
-              <span className="text-xs text-muted">{models.length} Models Available</span>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted">{models.length} Total</span>
+                <span className="text-emerald-400 font-semibold">• {activeModels.length} Active for Queries</span>
+              </div>
             </div>
 
-            {/* Batch Controls: Select All & Active for Queries */}
-            <div className="model-library-batch-bar">
-              <label 
-                className="batch-select-label"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input 
-                  type="checkbox"
-                  checked={models.length > 0 && selectedModelIds.length === models.length}
-                  onChange={handleToggleSelectAll}
-                  className="batch-checkbox"
-                />
-                <span className="batch-select-text">
-                  Select All <span className="batch-count">({selectedModelIds.length}/{models.length})</span>
-                </span>
-              </label>
-
-              <button
-                type="button"
-                onClick={handleActivateSelectedForQueries}
-                disabled={selectedModelIds.length === 0}
-                className={`btn-active-for-queries ${areSelectedModelsActive() ? 'is-active' : ''}`}
-                title={
-                  selectedModelIds.length === 0
-                    ? "Select models to activate for queries"
-                    : `Attach ${selectedModelIds.length} model(s) as external model attachment for chat queries`
-                }
-              >
-                {areSelectedModelsActive() ? (
-                  <>
-                    <CheckCircle2 size={14} className="text-emerald-400" />
-                    <span>Active for Queries ({selectedModelIds.length})</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap size={14} />
-                    <span>Active for Queries</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="model-card-list">
-              {models.map((model) => {
-                const isActive = isModelActive(model.id);
-                const isSelectedInBatch = selectedModelIds.includes(model.id);
-                const isDetailSelected = selectedModel?.id === model.id;
-
-                return (
-                  <div 
-                    key={model.id}
-                    onClick={() => setSelectedModel(model)}
-                    className={`model-list-card ${isDetailSelected ? 'selected' : ''} ${isActive ? 'active-model' : ''}`}
+            {/* 2-Column Split: Inactive on Left (with Select All) | Activated on Right (Below Activated Option) */}
+            <div className="model-library-columns-grid">
+              {/* LEFT COLUMN: Not Activated Models */}
+              <div className="model-library-column column-inactive">
+                <div className="column-header">
+                  <label 
+                    className="batch-select-label"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="card-top">
-                      <div 
-                        className="model-card-check-wrap"
-                        onClick={(e) => handleToggleSelectModel(model.id, e)}
-                        title={isSelectedInBatch ? "Uncheck model" : "Check model for batch queries"}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelectedInBatch}
-                          onChange={(e) => handleToggleSelectModel(model.id, e)}
-                          className="model-card-checkbox"
-                        />
-                      </div>
-                      <div className="model-icon-badge">
-                        <Cpu size={18} className={isActive ? 'text-emerald-400' : 'text-blue-400'} />
-                      </div>
-                      <div className="model-meta">
-                        <div className="flex items-center gap-2">
-                          <h4 className="model-name">{model.name}</h4>
-                          {isActive && (
-                            <span className="badge-active-live">
-                              <span className="live-dot"></span> Active in Chat
-                            </span>
-                          )}
-                          {model.isCustom && (
-                            <span className="badge-pill badge-pill-custom">Custom</span>
-                          )}
-                        </div>
-                        <p className="model-task">{model.task} • {model.architecture}</p>
-                      </div>
+                    <input 
+                      type="checkbox"
+                      checked={inactiveModels.length > 0 && inactiveModels.every(m => selectedModelIds.includes(m.id))}
+                      onChange={() => handleToggleSelectAllInactive(inactiveModels.map(m => m.id))}
+                      className="batch-checkbox"
+                      disabled={inactiveModels.length === 0}
+                    />
+                    <span className="batch-select-text">
+                      Select All <span className="batch-count">({selectedModelIds.filter(id => inactiveModels.some(m => m.id === id)).length}/{inactiveModels.length})</span>
+                    </span>
+                  </label>
+                  <span className="column-badge badge-inactive">Not Activated</span>
+                </div>
+
+                <div className="model-column-card-list">
+                  {inactiveModels.length === 0 ? (
+                    <div className="model-column-empty">
+                      <CheckCircle2 size={26} className="text-emerald-400" />
+                      <p className="empty-title">All Models Activated</p>
+                      <p className="empty-desc">All available models are currently active for queries on the right.</p>
                     </div>
+                  ) : (
+                    inactiveModels.map((model) => renderModelCard(model, false))
+                  )}
+                </div>
+              </div>
 
-                    <div className="card-bottom">
-                      <div className="specs-row">
-                        <span>Format: <strong>{model.format}</strong></span>
-                        <span>Size: <strong>{model.size}</strong></span>
-                        <span>Precision: <strong>{model.precision}</strong></span>
-                      </div>
-
-                      <div className="actions-row">
-                        {isActive ? (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleDeactivateModel(); }}
-                            className="btn btn-xs btn-active-toggle"
-                            title="Deactivate this model from queries"
-                          >
-                            <Check size={12} /> Active
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
-                            className="btn btn-xs btn-secondary"
-                            title="Set this model as active for queries"
-                          >
-                            Set Active
-                          </button>
-                        )}
-
-                        {model.isCustom && (
-                          <button 
-                            onClick={(e) => handleDeleteModel(model.id, e)}
-                            className="btn btn-xs btn-ghost text-red-400 hover:text-red-300"
-                            title="Remove attached model"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
+              {/* RIGHT COLUMN: Activated Models (Below the Active for Queries Option) */}
+              <div className="model-library-column column-active">
+                <div className="column-header">
+                  <div className="flex items-center gap-1.5">
+                    <Zap size={15} className="text-emerald-400" />
+                    <span className="column-title font-bold text-emerald-400">Active for Queries</span>
+                    <span className="batch-count">({activeModels.length})</span>
                   </div>
-                );
-              })}
+
+                  <button
+                    type="button"
+                    onClick={handleActivateSelectedForQueries}
+                    disabled={selectedModelIds.filter(id => inactiveModels.some(m => m.id === id)).length === 0}
+                    className="btn-active-for-queries btn-xs"
+                    title="Attach selected models on the left as active for chat queries"
+                  >
+                    <Zap size={13} />
+                    <span>Activate Selected ({selectedModelIds.filter(id => inactiveModels.some(m => m.id === id)).length})</span>
+                  </button>
+                </div>
+
+                <div className="model-column-card-list">
+                  {activeModels.length === 0 ? (
+                    <div className="model-column-empty">
+                      <AlertCircle size={26} className="text-amber-400" />
+                      <p className="empty-title">No Models Active</p>
+                      <p className="empty-desc">Select models on the left and click "Activate Selected" to attach them for queries.</p>
+                    </div>
+                  ) : (
+                    activeModels.map((model) => renderModelCard(model, true))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
