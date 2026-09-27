@@ -291,7 +291,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
       {/* Toast Notification */}
       {toastMessage && (
         <div className="model-toast animate-fadeIn">
-          <CheckCircle2 size={16} className="text-emerald-400" />
+          <CheckCircle2 size={16} className="text-primary" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -324,7 +324,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
               <div className="status-indicator-dot online"></div>
               <div className="text-xs">
                 <span className="text-muted block">Active in Chat:</span>
-                <strong className="text-emerald-400">
+                <strong className="text-primary">
                   {models.find(m => m.id === currentActiveId)?.name || 'Custom Model'}
                 </strong>
               </div>
@@ -432,7 +432,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-muted">{models.length} Total</span>
-                <span className="text-emerald-400 font-semibold">• {activeModels.length} Active</span>
+                <span className="text-primary font-semibold">• {activeModels.length} Active</span>
               </div>
             </div>
 
@@ -502,7 +502,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                           />
                         </label>
                         <div className="model-icon-badge">
-                          <Cpu size={18} className={isActive ? 'text-emerald-400' : 'text-blue-400'} />
+                          <Cpu size={18} className="text-primary" />
                         </div>
                         <div className="model-meta">
                           <div className="flex items-center gap-2">
@@ -529,28 +529,18 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
 
                         <div className="actions-row">
                           {isActive ? (
-                            <span className="badge-on-right text-emerald-400 text-xs font-semibold flex items-center gap-1">
+                            <span className="badge-on-right text-primary text-xs font-semibold flex items-center gap-1">
                               <CheckCircle2 size={13} /> Active on Right
                             </span>
                           ) : (
-                            <>
-                              <button 
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleToggleSelectModel(model.id); }}
-                                className={`btn btn-xs ${isTicked ? 'btn-primary' : 'btn-secondary'}`}
-                                title={isTicked ? "Untick model" : "Tick model for activation"}
-                              >
-                                {isTicked ? '✓ Ticked' : 'Tick to Select'}
-                              </button>
-                              <button 
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
-                                className="btn btn-xs btn-secondary"
-                                title="Make this model active for queries"
-                              >
-                                Set Active
-                              </button>
-                            </>
+                            <button 
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
+                              className="btn btn-xs btn-secondary"
+                              title="Make this model active for queries"
+                            >
+                              Set Active
+                            </button>
                           )}
 
                           {model.isCustom && (
@@ -579,8 +569,8 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
           <div className="active-queries-panel">
             <div className="active-queries-header">
               <div className="flex items-center gap-2">
-                <Zap size={18} className="text-emerald-400" />
-                <h3 className="section-title text-emerald-400">Active for Queries</h3>
+                <Zap size={18} className="text-primary" />
+                <h3 className="section-title">Active for Queries</h3>
                 <span className="active-count-badge">{activeModels.length} Active</span>
               </div>
 
@@ -833,7 +823,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 {testResult && (
                   <div className="test-result-box animate-fadeIn">
                     <div className="test-telemetry-bar">
-                      <span className="badge-pill badge-pill-emerald">
+                      <span className="badge-pill badge-pill-cyan">
                         <Check size={11} /> Inference Passed
                       </span>
                       <span className="telemetry-stat">
