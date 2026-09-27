@@ -355,20 +355,6 @@ export function LandingHero({
         Enterprise remote sensing vision-language intelligence for multi-sensor satellite imagery.
       </p>
 
-      {/* Active Project Pill Indicator */}
-      {activeProject && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, margin: '-10px 0 20px', flexWrap: 'wrap' }}>
-          <div 
-            onClick={() => onNavigateScreen?.('projects')}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 'var(--radius-full)', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', cursor: 'pointer', fontSize: '0.78rem' }}
-            title="Click to open active project workspace"
-          >
-            <span>{activeProject.icon || '📁'}</span>
-            <span style={{ color: 'var(--text-muted)' }}>Project:</span>
-            <strong style={{ color: '#3b82f6' }}>{activeProject.name}</strong>
-          </div>
-        </div>
-      )}
 
       {/* Upload mode: the existing nav pill style */}
       <div className="nav-tabs-pill upload-mode-toggle" role="tablist" aria-label="Upload mode">

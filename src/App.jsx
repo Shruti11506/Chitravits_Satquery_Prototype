@@ -41,7 +41,8 @@ import {
   updateSettings,
   applySettingsChanges,
   getProject,
-  listProjects
+  listProjects,
+  listConversations
 } from './lib/apiClient';
 import { buildModalStateFromError, buildModalStateFromValidation } from './lib/changeDetectionValidation';
 
@@ -61,7 +62,7 @@ function prefersDarkScheme() {
   try {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -300,14 +301,17 @@ function SidebarBackdrop() {
 }
 
 export function App() {
-  // Theme preference ('dark' | 'light' | 'system', saved in user_settings) and
-  // the theme actually shown. 'system' follows the OS setting live.
-  const [themePreference, setThemePreference] = useState(() => readPointer(THEME_KEY) || localStorage.getItem('satquery-theme') || 'dark');
+  // Theme preference ('dark' | 'light' | 'system', default 'light' for fresh page loads)
+  const [themePreference, setThemePreference] = useState(() => readPointer(THEME_KEY) || localStorage.getItem('satquery-theme') || 'light');
   const [sidebarDensity, setSidebarDensity] = useState(() => readPointer(DENSITY_KEY) || 'comfortable');
   const [systemPrefersDark, setSystemPrefersDark] = useState(prefersDarkScheme);
   const theme = themePreference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : themePreference;
   // Patterned theme wavefront state (ISRO satellite + NASA Earth animation)
   const [themeWave, setThemeWave] = useState(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   // Active Screen state: 'landing', or the profile/settings screen if it was open before a refresh.
   const initialScreenRef = useRef(
@@ -543,10 +547,12 @@ export function App() {
   const showSettings = useCallback((data) => {
     settingsRef.current = data;
     setSettingsState({ status: 'ready', data, error: null });
-    setThemePreference(data.preferences.theme);
+    const savedTheme = readPointer(THEME_KEY) || localStorage.getItem('satquery-theme');
+    const effectiveTheme = savedTheme || 'light';
+    setThemePreference(effectiveTheme);
     setSidebarDensity(data.preferences.sidebar_density);
     // Read the OS setting now rather than trusting the value from page load.
-    if (data.preferences.theme === 'system') setSystemPrefersDark(prefersDarkScheme());
+    if (effectiveTheme === 'system') setSystemPrefersDark(prefersDarkScheme());
   }, []);
 
   const loadSettings = useCallback(() => {

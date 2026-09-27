@@ -19,7 +19,7 @@ TABLE = "user_settings"
 
 # Same values as the column defaults in migrations/0005_user_settings.sql.
 DEFAULTS = {
-    "theme": "dark",
+    "theme": "light",
     "language": "en",
     "sidebar_density": "comfortable",
     "default_data_type": "optical_rgb",

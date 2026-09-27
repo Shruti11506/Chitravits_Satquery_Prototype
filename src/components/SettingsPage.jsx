@@ -26,11 +26,6 @@ import './SettingsPage.css';
 // privacy) or the existing /profile endpoints (profile). Nothing here is a
 // local-only setting.
 
-const THEME_OPTIONS = [
-  ['dark', 'Dark'],
-  ['light', 'Light'],
-  ['system', 'System']
-];
 const LANGUAGE_OPTIONS = [['en', 'English']];
 const DENSITY_OPTIONS = [
   ['comfortable', 'Comfortable'],
@@ -347,7 +342,6 @@ export function SettingsPage({ settingsState, onRetry, onSave, onProfileSaved })
         <section className="pf-card st-card" aria-labelledby="st-prefs-title">
           <CardHead icon={MonitorCog} title={<span id="st-prefs-title">App Preferences</span>} subtitle="Customize the look and feel" status={prefStatus} />
           <div className="st-rows">
-            <SelectRow id="st-theme" label="Theme" value={preferences.theme} options={THEME_OPTIONS} onChange={(v) => savePrefs({ theme: v })} />
             <SelectRow id="st-language" label="Language" value={preferences.language} options={LANGUAGE_OPTIONS} onChange={(v) => savePrefs({ language: v })} />
             <SelectRow id="st-density" label="Sidebar density" value={preferences.sidebar_density} options={DENSITY_OPTIONS} onChange={(v) => savePrefs({ sidebar_density: v })} />
             <SelectRow id="st-data-type" label="Default data type" value={preferences.default_data_type} options={DATA_TYPE_OPTIONS} onChange={(v) => savePrefs({ default_data_type: v })} />
