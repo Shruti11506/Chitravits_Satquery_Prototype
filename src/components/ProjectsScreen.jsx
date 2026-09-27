@@ -14,7 +14,7 @@ import {
   uploadProjectFile,
   deleteProjectFile
 } from '../lib/apiClient';
-import { getActiveProjectId, setActiveProjectId } from '../lib/projectsStorage';
+import { setActiveProjectId } from '../lib/projectsStorage';
 
 const EMOJI_OPTIONS = ['📁', '🚨', '🏙️', '🌊', '🌾', '🛰️', '🌋', '🚢', '🗺️', '🌲'];
 const COLOR_OPTIONS = ['#3b82f6', '#ef4444', '#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#ec4899'];
@@ -74,19 +74,24 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     try {
       const apiProjects = await listProjects();
       setProjects(apiProjects);
-      // Prefer initialProjectId passed from App (sidebar click), then fall back
-      // to the last remembered active project.
-      const targetId = initialProjectId || getActiveProjectId();
-      if (targetId) {
+      // Only open a specific project when explicitly requested via initialProjectId.
+      // NEVER fall back to getActiveProjectId() here — that would auto-open
+      // the last project every time the user clicks the sidebar "Projects" shortcut.
+      if (initialProjectId) {
         try {
-          const detail = await getProject(targetId);
+          const detail = await getProject(initialProjectId);
           setActiveProject(detail);
           setActiveProjectId(detail.id);
         } catch (err) {
-          console.warn('[SatQuery] Could not load active project detail:', err);
-          setActiveProjectId(null);
+          console.warn('[SatQuery] Could not load requested project detail:', err);
           setActiveProject(null);
+          setActiveProjectId(null);
         }
+      }
+      // No initialProjectId → stay on the All Projects listing; clear the
+      // stored pointer so a future sidebar click always shows the full list.
+      else {
+        setActiveProjectId(null);
       }
     } catch (err) {
       console.error('[SatQuery] Error loading projects from backend:', err);
