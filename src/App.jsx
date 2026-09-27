@@ -317,6 +317,9 @@ export function App() {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const activeProjectRef = useRef(null);
+  // The project id that should be pre-opened when ProjectsScreen mounts
+  // (set when user clicks a project card in the sidebar).
+  const [initialProjectId, setInitialProjectId] = useState(null);
 
   useEffect(() => {
     activeProjectRef.current = activeProject;
@@ -328,6 +331,9 @@ export function App() {
   };
 
   const handleOpenProject = (project) => {
+    // Track which specific project to open so ProjectsScreen can deep-link
+    // into it on mount without a second round-trip or state conflict.
+    setInitialProjectId(project ? project.id : null);
     setActiveProject(project);
     setActiveProjectId(project ? project.id : null);
     navigateToScreen('projects');
@@ -345,6 +351,12 @@ export function App() {
       setHistoryStack(prev => [...prev, activeScreen]);
       setActiveScreen(screenId);
     }
+  };
+
+  // Navigate to projects listing (from sidebar shortcut — no specific project).
+  const navigateToProjectsList = () => {
+    setInitialProjectId(null);
+    navigateToScreen('projects');
   };
 
   const handleGoBack = () => {
@@ -852,7 +864,12 @@ export function App() {
         onSelectHistoryItem={handleSelectHistoryItem}
         onConversationRenamed={handleConversationRenamed}
         onConversationDeleted={handleConversationDeleted}
-        onNavigateScreen={navigateToScreen}
+        onNavigateScreen={(screenId) => {
+          // The sidebar Projects shortcut should always show the full list,
+          // never jump into a specific project workspace.
+          if (screenId === 'projects') navigateToProjectsList();
+          else navigateToScreen(screenId);
+        }}
         activeScreen={activeScreen}
         activeConversationId={activeConversation?.id || null}
         activeImageryId={workspaceScenario?.isLegacy ? workspaceScenario.id : null}
@@ -931,9 +948,14 @@ export function App() {
 
             {activeScreen === 'projects' && (
               <ProjectsScreen
-                onGoBack={handleGoBack}
+                key={initialProjectId ?? 'projects-list'}
+                onGoBack={() => {
+                  setInitialProjectId(null);
+                  handleGoBack();
+                }}
                 onStartProjectChat={handleStartProjectChat}
                 onOpenConversation={handleSelectConversation}
+                initialProjectId={initialProjectId}
               />
             )}
 

@@ -45,13 +45,15 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversation }) {
+export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversation, initialProjectId }) {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'instructions' | 'files'
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  // Per-project loading: true while opening a specific project workspace
+  const [isProjectLoading, setIsProjectLoading] = useState(false);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -72,11 +74,14 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     try {
       const apiProjects = await listProjects();
       setProjects(apiProjects);
-      const activeId = getActiveProjectId();
-      if (activeId) {
+      // Prefer initialProjectId passed from App (sidebar click), then fall back
+      // to the last remembered active project.
+      const targetId = initialProjectId || getActiveProjectId();
+      if (targetId) {
         try {
-          const detail = await getProject(activeId);
+          const detail = await getProject(targetId);
           setActiveProject(detail);
+          setActiveProjectId(detail.id);
         } catch (err) {
           console.warn('[SatQuery] Could not load active project detail:', err);
           setActiveProjectId(null);
@@ -94,6 +99,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
 
   useEffect(() => {
     loadProjectsData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const showToast = (msg) => {
@@ -101,15 +107,19 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const handleOpenProject = async (proj) => {
+  const handleOpenProject = async (proj, e) => {
+    e?.stopPropagation();
     setActiveProjectId(proj.id);
     setActiveTab('chats');
+    setIsProjectLoading(true);
     try {
       const detail = await getProject(proj.id);
       setActiveProject(detail);
     } catch (err) {
       console.error('[SatQuery] Error opening project detail:', err);
       showToast('Failed to load project details from backend.');
+    } finally {
+      setIsProjectLoading(false);
     }
   };
 
@@ -259,6 +269,119 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
+  // ── LOADING STATE ────────────────────────────────────────────────────────
+  // Gate on initial data fetch: never show a blank or partially-rendered page.
+  if (isLoading) {
+    return (
+      <div className="projects-screen" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '70vh' }}>
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+          {/* Orbital ring loader */}
+          <div style={{ position: 'relative', width: 72, height: 72 }}>
+            <div style={{
+              position: 'absolute', inset: 0,
+              border: '2px solid rgba(59,130,246,0.15)',
+              borderTopColor: '#3b82f6',
+              borderRadius: '50%',
+              animation: 'spin 1.1s linear infinite'
+            }} />
+            <div style={{
+              position: 'absolute', inset: 10,
+              border: '2px solid rgba(6,182,212,0.12)',
+              borderTopColor: 'rgba(6,182,212,0.7)',
+              borderRadius: '50%',
+              animation: 'spin 0.75s linear infinite reverse'
+            }} />
+            <div style={{
+              position: 'absolute', inset: '50%', transform: 'translate(-50%,-50%)',
+              width: 10, height: 10,
+              background: '#3b82f6',
+              borderRadius: '50%',
+              boxShadow: '0 0 12px rgba(59,130,246,0.8)'
+            }} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary, #e2e8f0)', marginBottom: 6 }}>
+              Preparing your projects
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #64748b)', letterSpacing: '0.02em' }}>
+              Fetching projects from workspace…
+            </div>
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  // ── ERROR STATE ───────────────────────────────────────────────────────────
+  if (loadError && projects.length === 0) {
+    return (
+      <div className="projects-screen" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '70vh' }}>
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div style={{
+            width: 56, height: 56,
+            borderRadius: '50%',
+            background: 'rgba(239,68,68,0.1)',
+            border: '1px solid rgba(239,68,68,0.3)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <span style={{ fontSize: '1.5rem' }}>⚠</span>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary, #e2e8f0)', marginBottom: 6 }}>
+              Unable to load projects
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #64748b)', maxWidth: 300 }}>
+              {loadError}
+            </div>
+          </div>
+          <button
+            onClick={() => loadProjectsData()}
+            className="btn btn-secondary"
+          >
+            ↻ Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PROJECT WORKSPACE LOADING ─────────────────────────────────────────────
+  // Show a brief loading state while fetching a specific project's detail.
+  if (isProjectLoading) {
+    return (
+      <div className="projects-screen" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '70vh' }}>
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+          <div style={{ position: 'relative', width: 64, height: 64 }}>
+            <div style={{
+              position: 'absolute', inset: 0,
+              border: '2px solid rgba(6,182,212,0.15)',
+              borderTopColor: '#06b6d4',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite'
+            }} />
+            <div style={{
+              position: 'absolute', inset: '50%', transform: 'translate(-50%,-50%)',
+              width: 8, height: 8,
+              background: '#06b6d4',
+              borderRadius: '50%',
+              boxShadow: '0 0 10px rgba(6,182,212,0.8)'
+            }} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary, #e2e8f0)', marginBottom: 6 }}>
+              Opening project workspace
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #64748b)' }}>
+              Loading chats, files and instructions…
+            </div>
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="projects-screen">
       {/* Toast Notification */}
@@ -357,8 +480,11 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
             {filteredProjects.map((proj) => (
               <div 
                 key={proj.id}
-                onClick={() => handleOpenProject(proj)}
+                onClick={(e) => handleOpenProject(proj, e)}
                 className="project-card"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && handleOpenProject(proj, e)}
               >
                 <div className="card-header">
                   <div 
@@ -368,16 +494,16 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                     <span className="text-xl">{proj.icon || '📁'}</span>
                   </div>
 
-                  <div className="card-menu-actions">
+                  <div className="card-menu-actions" onClick={(e) => e.stopPropagation()}>
                     <button 
-                      onClick={(e) => handleOpenEditModal(proj, e)}
+                      onClick={(e) => { e.stopPropagation(); handleOpenEditModal(proj, e); }}
                       className="btn-icon-subtle"
                       title="Edit project"
                     >
                       <Edit3 size={14} />
                     </button>
                     <button 
-                      onClick={(e) => handleDeleteProject(proj.id, e)}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteProject(proj.id, e); }}
                       className="btn-icon-subtle text-red-400 hover:text-red-300"
                       title="Delete project"
                     >
