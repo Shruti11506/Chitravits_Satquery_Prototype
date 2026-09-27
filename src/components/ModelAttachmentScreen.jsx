@@ -3,7 +3,7 @@ import {
   Cpu, Upload, FolderUp, CheckCircle2, ShieldCheck, Zap,
   Play, Settings, FileCode, Check, Trash2, ArrowLeft,
   FileCheck, Sparkles, HardDrive, RefreshCw, AlertCircle,
-  Layers, Sliders, Info, Eye, Boxes
+  Layers, Sliders, Info, Eye, Boxes, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { 
   getStoredModels, saveStoredModels, getActiveModelId, 
@@ -21,6 +21,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
   const [testResult, setTestResult] = useState(null);
   const [isTesting, setIsTesting] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const [showCheckpoints, setShowCheckpoints] = useState(false);
 
   const folderInputRef = useRef(null);
   const filesInputRef = useRef(null);
@@ -602,26 +603,33 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                       key={model.id}
                       onClick={() => setSelectedModel(model)}
                       className={`active-model-item ${isInspecting ? 'active-item-selected' : ''}`}
-                      title="Click to tune parameters and run test inference below"
+                      title="Click to inspect and tune parameters below"
                     >
                       <div className="active-item-left">
                         <div className="active-pulse-indicator"></div>
-                        <div>
-                          <div className="flex items-center gap-2">
+                        <div className="active-item-content">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
                             <h4 className="active-item-name">{model.name}</h4>
                             <span className="badge-active-live">
                               <span className="live-dot"></span> Active in Chat
                             </span>
                             {isInspecting && (
-                              <span className="inspecting-pill">Inspecting</span>
+                              <span className="inspecting-pill">Inspecting Configuration</span>
                             )}
                           </div>
-                          <p className="active-item-sub">{model.task} • {model.format} • {model.size}</p>
+                          
+                          <div className="active-meta-pills">
+                            <span className="meta-pill">{model.task}</span>
+                            <span className="meta-pill font-mono">{model.format}</span>
+                            <span className="meta-pill font-mono">{model.size}</span>
+                            <span className="meta-pill font-mono">{model.architecture}</span>
+                          </div>
                         </div>
                       </div>
 
                       <div className="active-item-actions">
                         <button 
+                          type="button"
                           onClick={(e) => { e.stopPropagation(); handleDeactivateSingleModel(model.id); }}
                           className="btn btn-xs btn-deactivate"
                           title="Remove this model from active queries"
@@ -685,26 +693,42 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 </div>
               </div>
 
-              {/* Detected Files in Folder */}
-              <div className="detail-section">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="detail-subheading">
-                    <HardDrive size={14} className="text-cyan-400 inline mr-1.5" />
-                    Detected Checkpoint Files ({selectedModel.files?.length || 0})
-                  </h4>
-                  <span className="text-xs text-muted font-mono">{selectedModel.size} Total</span>
-                </div>
+              {/* See More: Checkpoints Toggle Accordion (Hidden by default to maintain readability) */}
+              <div className="checkpoints-accordion-wrap">
+                <button 
+                  type="button" 
+                  onClick={() => setShowCheckpoints(prev => !prev)}
+                  className="btn-see-more-checkpoints"
+                  title="Click to view or hide checkpoint weights & config files"
+                >
+                  <div className="flex items-center gap-2">
+                    <HardDrive size={15} className="text-blue-500 dark:text-cyan-400" />
+                    <span className="see-more-title">
+                      {showCheckpoints 
+                        ? 'Hide Checkpoint Files' 
+                        : `See More (${selectedModel.files?.length || 0} Checkpoints & Config Files)`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <span className="font-mono text-xs">{selectedModel.size}</span>
+                    {showCheckpoints ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </div>
+                </button>
 
-                <div className="files-pill-container">
-                  {(selectedModel.files || []).map((file, idx) => (
-                    <div key={idx} className={`file-badge file-${file.type}`}>
-                      <FileCode size={13} />
-                      <span className="file-name">{file.name}</span>
-                      <span className="file-size">{file.size}</span>
-                      <span className="file-type-tag">{file.type}</span>
+                {showCheckpoints && (
+                  <div className="checkpoints-expanded-panel animate-fadeIn">
+                    <div className="files-pill-container">
+                      {(selectedModel.files || []).map((file, idx) => (
+                        <div key={idx} className={`file-badge file-${file.type}`}>
+                          <FileCode size={13} />
+                          <span className="file-name">{file.name}</span>
+                          <span className="file-size">{file.size}</span>
+                          <span className="file-type-tag">{file.type}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* Tunable Inference Parameters */}
