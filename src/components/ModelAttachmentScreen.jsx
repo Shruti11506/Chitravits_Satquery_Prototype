@@ -263,6 +263,25 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
     showToast('Model removed from attached library.');
   };
 
+  const handleDeleteSelectedModels = () => {
+    if (selectedModelIds.length === 0) return;
+    const count = selectedModelIds.length;
+    const updated = models.filter(m => !selectedModelIds.includes(m.id));
+    setModels(updated);
+    saveStoredModels(updated);
+    setSelectedModelIds([]);
+    if (selectedModelIds.includes(currentActiveId)) {
+      const fallback = updated[0]?.id || null;
+      setCurrentActiveId(fallback);
+      setActiveModelId(fallback);
+      onSelectModel?.(updated[0] || null);
+    }
+    if (selectedModel && selectedModelIds.includes(selectedModel.id)) {
+      setSelectedModel(updated[0] || null);
+    }
+    showToast(`${count} model${count > 1 ? 's' : ''} removed from attached library.`);
+  };
+
   const handleUpdateModelSettings = (field, value) => {
     if (!selectedModel) return;
     const updatedModel = { ...selectedModel, [field]: value };
@@ -447,16 +466,30 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                 </span>
               </label>
 
-              <button
-                type="button"
-                onClick={handleActivateSelectedForQueries}
-                disabled={selectedModelIds.length === 0}
-                className="btn-active-for-queries"
-                title="Attach selected models as active for chat queries (moves them to the right)"
-              >
-                <Zap size={13} />
-                <span>Active for Queries ({selectedModelIds.length})</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectedModelIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedModels}
+                    className="btn-delete-selected"
+                    title="Delete all selected models from attachments"
+                  >
+                    <Trash2 size={14} />
+                    <span>Delete Selected ({selectedModelIds.length})</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleActivateSelectedForQueries}
+                  disabled={selectedModelIds.length === 0}
+                  className="btn-active-for-queries"
+                  title="Attach selected models as active for chat queries (moves them to the right)"
+                >
+                  <Zap size={14} />
+                  <span>Active for Queries ({selectedModelIds.length})</span>
+                </button>
+              </div>
             </div>
 
             {/* Single list of models below Select All option */}
@@ -529,16 +562,15 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                             </button>
                           )}
 
-                          {model.isCustom && (
-                            <button 
-                              type="button"
-                              onClick={(e) => handleDeleteModel(model.id, e)}
-                              className="btn btn-xs btn-ghost text-red-400 hover:text-red-300"
-                              title="Remove attached model"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
+                          <button 
+                            type="button"
+                            onClick={(e) => handleDeleteModel(model.id, e)}
+                            className="btn-delete-card"
+                            title={`Delete "${model.name}" from attachments`}
+                          >
+                            <Trash2 size={13} />
+                            <span>Delete</span>
+                          </button>
                         </div>
                       </div>
                     </div>
