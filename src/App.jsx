@@ -6,7 +6,7 @@ import { Workspace } from './components/Workspace';
 import { ImageViewer } from './components/ImageViewer';
 import { ChangeDetection } from './components/ChangeDetection';
 import { FusionViewer } from './components/FusionViewer';
-import { AgentPipeline } from './components/AgentPipeline';
+
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ReportScreen } from './components/ReportScreen';
 import { ProfileDashboard } from './components/ProfileDashboard';
@@ -966,9 +966,6 @@ export function App() {
               <FusionViewer scenario={currentScenario} onGoBack={handleGoBack} />
             )}
 
-            {activeScreen === 'pipeline' && (
-              <AgentPipeline scenario={currentScenario} onGoBack={handleGoBack} />
-            )}
 
             {activeScreen === 'analytics' && (
               <AnalyticsDashboard scenario={currentScenario} onGoBack={handleGoBack} />
