@@ -528,7 +528,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                           />
                         </label>
                         <div className="model-icon-badge">
-                          <Cpu size={18} className="text-primary" />
+                          <Cpu size={22} className="text-primary" />
                         </div>
                         <div className="model-meta">
                           <div className="flex items-center gap-2">
@@ -545,9 +545,9 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
 
                       <div className="card-bottom">
                         <div className="specs-row">
-                          <span>Format: <strong>{model.format}</strong></span>
-                          <span>Size: <strong>{model.size}</strong></span>
-                          <span>Precision: <strong>{model.precision}</strong></span>
+                          <span className="spec-tag">Format: <strong>{model.format}</strong></span>
+                          <span className="spec-tag">Size: <strong>{model.size}</strong></span>
+                          <span className="spec-tag">Precision: <strong>{model.precision}</strong></span>
                         </div>
 
                         <div className="actions-row">
@@ -555,7 +555,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                             <button 
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleActivateModel(model.id); }}
-                              className="btn btn-xs btn-secondary"
+                              className="btn btn-sm btn-secondary"
                               title="Make this model active for queries"
                             >
                               Set Active
@@ -568,7 +568,7 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
                             className="btn-delete-card"
                             title={`Delete "${model.name}" from attachments`}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={14} />
                             <span>Delete</span>
                           </button>
                         </div>
