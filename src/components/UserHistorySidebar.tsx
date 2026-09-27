@@ -495,10 +495,10 @@ export function UserHistorySidebar({
   }))
 
   return (
-    <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border select-none">
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border select-none">
       {/* Header: Brand, New Chat, and Sidebar Close Action */}
-      <SidebarHeader className="p-3 pb-2 border-b border-sidebar-border/30">
-        <div className="flex items-center justify-between gap-2">
+      <SidebarHeader className="p-3 pb-2 border-b border-sidebar-border/30 group-data-[collapsible=icon]:p-2">
+        <div className="flex items-center justify-between gap-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2">
           <div 
             className="flex items-center gap-2 px-1 cursor-pointer hover:opacity-90 transition-opacity"
             onClick={() => {
@@ -510,17 +510,17 @@ export function UserHistorySidebar({
             <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center p-0.5 border border-blue-500/40 shadow-sm shrink-0">
               <ChitravitsEmblem size={24} />
             </div>
-            <span className="font-bold text-sm tracking-tight text-sidebar-foreground">
+            <span className="font-bold text-sm tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
               Sat<span className="text-blue-500">Query</span> <span className="text-[10px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30 ml-0.5">AI</span>
             </span>
           </div>
 
           <div className="flex items-center gap-0.5">
-            <SidebarTrigger className="hover:bg-sidebar-accent rounded-lg p-1.5 transition-colors cursor-pointer text-sidebar-foreground" title="Close Sidebar (Ctrl+B)" />
+            <SidebarTrigger className="hover:bg-sidebar-accent rounded-lg p-1.5 transition-colors cursor-pointer text-sidebar-foreground" title="Toggle Sidebar (Ctrl+B)" />
           </div>
         </div>
 
-        {/* Primary ChatGPT-Style Fast Shortcuts */}
+        {/* Primary Fast Shortcuts */}
         <SidebarMenu className="mt-2">
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -529,9 +529,10 @@ export function UserHistorySidebar({
                 dismissSidebar()
               }}
               tooltip="New Chat"
+              aria-label="New Chat"
             >
               <SquarePen aria-hidden="true" />
-              <span>New chat</span>
+              <span className="group-data-[collapsible=icon]:hidden">New chat</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
@@ -542,10 +543,11 @@ export function UserHistorySidebar({
                 dismissSidebar()
               }}
               isActive={activeScreen === "fusion"}
-              tooltip="Multimodal Satellite Images"
+              tooltip="Images"
+              aria-label="Images"
             >
               <ImageIcon aria-hidden="true" />
-              <span>Images</span>
+              <span className="group-data-[collapsible=icon]:hidden">Images</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
 
@@ -557,13 +559,14 @@ export function UserHistorySidebar({
               }}
               isActive={activeScreen === "model-attach"}
               className="text-[0.92rem] py-2 h-9 relative"
-              tooltip="Attach Custom AI Model (Folder Drag & Drop)"
+              tooltip="Attach Model"
+              aria-label="Attach Model"
             >
               <Cpu className="w-4 h-4 text-sidebar-foreground" />
-              <span className="flex-1 truncate">Attach model</span>
+              <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Attach model</span>
               {activeModel && (
                 <span 
-                  className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)] shrink-0" 
+                  className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)] shrink-0 group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:top-1 group-data-[collapsible=icon]:right-1" 
                   title={`Active Model: ${activeModel.name}`} 
                 />
               )}
@@ -578,17 +581,18 @@ export function UserHistorySidebar({
               }}
               isActive={activeScreen === "projects"}
               className="text-[0.92rem] py-2 h-9"
-              tooltip="ChatGPT-Style Project Workspaces"
+              tooltip="Projects"
+              aria-label="Projects"
             >
               <FolderKanban className="w-4 h-4 text-sidebar-foreground" />
-              <span>Projects</span>
+              <span className="group-data-[collapsible=icon]:hidden">Projects</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
-      {/* Main Content: Chronological Chat History -- backend-driven only */}
-      <SidebarContent className="px-2 scrollbar-thin">
+      {/* Main Content: Chronological Chat History -- backend-driven only, hidden in collapsed icon mode */}
+      <SidebarContent className="px-2 scrollbar-thin group-data-[collapsible=icon]:hidden">
         {status === "loading" && (
           <div className="px-3 py-4 text-xs text-sidebar-foreground/50">Loading history…</div>
         )}
@@ -689,14 +693,8 @@ export function UserHistorySidebar({
       </SidebarContent>
 
       {/* Footer: User Profile */}
-      <SidebarFooter className="p-3 border-t border-sidebar-border/60">
+      <SidebarFooter className="p-3 border-t border-sidebar-border/60 group-data-[collapsible=icon]:p-1.5">
         <SidebarMenu className="gap-1">
-          {/* User Profile Tile + its menu, which opens upward from it (anchored,
-              not portaled): it stays inside the sidebar at any width/height.
-              Spacing uses inline px / arbitrary px sizes on purpose: the global
-              `* { margin: 0; padding: 0 }` reset in index.css is unlayered, so
-              it overrides Tailwind's padding/margin utilities (p-*, m-*), and
-              rem sizes follow a 15px root. */}
           <SidebarMenuItem>
             <div className="relative">
               <SidebarMenuButton
@@ -705,12 +703,14 @@ export function UserHistorySidebar({
                 isActive={activeScreen === "profile"}
                 aria-haspopup="menu"
                 aria-expanded={isProfileMenuOpen}
+                aria-label={profileUser?.display_name || "Profile"}
+                tooltip={profileUser?.display_name || "Profile"}
                 onClick={() => setIsProfileMenuOpen((open) => !open)}
                 style={{ padding: "0 8px" }}
-                className="h-[52px] w-full gap-[10px] rounded-lg"
+                className="h-[52px] w-full gap-[10px] rounded-lg group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center"
               >
-                <ProfileAvatar user={profileUser} className="h-[36px] w-[36px] text-[13px]" />
-                <div className="flex min-w-0 flex-1 flex-col justify-center">
+                <ProfileAvatar user={profileUser} className="h-[36px] w-[36px] text-[13px] shrink-0" />
+                <div className="flex min-w-0 flex-1 flex-col justify-center group-data-[collapsible=icon]:hidden">
                   <span className="truncate text-[15px] font-semibold leading-5 text-sidebar-foreground">
                     {profileUser?.display_name ?? "Profile"}
                   </span>
@@ -720,7 +720,7 @@ export function UserHistorySidebar({
                     </span>
                   )}
                 </div>
-                <span className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60" aria-hidden="true">
+                <span className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden" aria-hidden="true">
                   <MoreHorizontal className="h-[16px] w-[16px]" />
                 </span>
               </SidebarMenuButton>
