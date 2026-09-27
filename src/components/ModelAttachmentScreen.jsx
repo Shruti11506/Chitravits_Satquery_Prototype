@@ -300,16 +300,8 @@ export function ModelAttachmentScreen({ onGoBack, onSelectModel, activeModelId }
       {/* Screen Header */}
       <div className="model-screen-header">
         <div className="header-left">
-          <button 
-            onClick={onGoBack} 
-            className="btn btn-secondary btn-icon-back"
-            title="Back to previous screen"
-          >
-            <ArrowLeft size={16} />
-            <span>Back</span>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="header-title-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <h2 className="screen-title">Attach Custom AI Model</h2>
               <span className="badge-pill badge-pill-cyan">Edge Geospatial Inference</span>
             </div>

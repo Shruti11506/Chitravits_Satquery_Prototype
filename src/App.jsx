@@ -281,8 +281,8 @@ function AppHeader({ theme, toggleTheme, activeScreen, handleNewChat, onGoBack }
 }
 
 function SidebarBackdrop() {
-  const { open, setOpen } = useSidebar();
-  if (!open) return null;
+  const { open, setOpen, isMobile } = useSidebar();
+  if (!open || !isMobile) return null;
   return (
     <div 
       className="sidebar-backdrop-overlay" 

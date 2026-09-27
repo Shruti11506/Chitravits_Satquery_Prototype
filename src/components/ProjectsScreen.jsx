@@ -392,7 +392,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
       {/* Toast Notification */}
       {toastMsg && (
         <div className="model-toast animate-fadeIn">
-          <Check size={16} className="text-emerald-400" />
+          <Check size={16} className="text-blue-400" />
           <span>{toastMsg}</span>
         </div>
       )}

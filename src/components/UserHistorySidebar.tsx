@@ -563,7 +563,7 @@ export function UserHistorySidebar({
               <span className="flex-1 truncate">Attach model</span>
               {activeModel && (
                 <span 
-                  className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)] shrink-0" 
+                  className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.85)] shrink-0" 
                   title={`Active Model: ${activeModel.name}`} 
                 />
               )}

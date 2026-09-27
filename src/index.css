@@ -2602,8 +2602,29 @@ code, pre {
 [data-sidebar="sidebar"] [data-sidebar="header"] {
   padding: 10px 8px 8px;
 }
-[data-sidebar="sidebar"] [data-sidebar="content"] {
+[data-sidebar="sidebar"] [data-sidebar="content"],
+.scrollbar-thin {
   padding: 4px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+[data-sidebar="sidebar"] [data-sidebar="content"]::-webkit-scrollbar,
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+[data-sidebar="sidebar"] [data-sidebar="content"]::-webkit-scrollbar-track,
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-sidebar="sidebar"] [data-sidebar="content"]::-webkit-scrollbar-thumb,
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+}
+[data-sidebar="sidebar"] [data-sidebar="content"]::-webkit-scrollbar-thumb:hover,
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
 }
 [data-sidebar="sidebar"] [data-sidebar="footer"] {
   padding: 8px;
