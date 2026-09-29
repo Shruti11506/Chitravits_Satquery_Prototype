@@ -10,7 +10,7 @@ from app.core.exceptions import NotFoundError, SchemaNotMigratedError, StorageEr
 from app.db.supabase import get_supabase
 from app.schemas.imagery import ImageryCreate
 from app.services import raster_service, storage_service
-from app.validation import band_validator, modality_validator, raster_validator
+from app.validation import band_validator, change_detection_validator, raster_validator
 from app.validation.schemas import ChangeDetectionImageMetadata, ImageInput, ImageSummary
 
 logger = logging.getLogger(__name__)
@@ -503,16 +503,20 @@ def change_detection_image_summary(image: ChangeDetectionImageMetadata) -> Image
     be read at all (nothing to summarize)."""
     if image.facts.error:
         return None
+    sensor = change_detection_validator.sensor_of(image)
     return ImageSummary(
         filename=image.filename,
         format=image.facts.format,
-        modality=modality_validator.detect_modality(
-            image.facts, extension=image.extension, sensor=image.sensor, source=image.source, hint=image.modality_hint
-        ),
-        bands=sorted(band_validator.detect_named_bands(image.facts)),
+        modality=change_detection_validator.modality_of(image, sensor).modality,
+        bands=sorted(band_validator.detect_named_bands(image.facts, sensor)),
         band_count=image.facts.band_count,
         width=image.facts.width,
         height=image.facts.height,
         aspect_ratio=(image.facts.width / image.facts.height) if image.facts.width and image.facts.height else None,
         crs=image.facts.crs,
+        dtype="+".join(sorted({str(d) for d in image.facts.dtypes if d})) or None,
+        sensor=sensor.label if sensor.status != "unknown" else None,
+        sensor_status=sensor.status,
+        sensor_source=sensor.source,
+        sensor_product=sensor.product,
     )

@@ -124,11 +124,14 @@ def _inspect(image: ImageInput, limits, errors: list[ValidationIssue]) -> Raster
 def _describe(image: ImageInput, facts: RasterFacts) -> ValidatedImageInfo:
     detected_bands: list[str] = []
     modality = "unknown"
+    sensor = modality_source = None
     if not facts.error:
-        detected_bands = sorted(band_validator.detect_named_bands(facts))
-        modality = modality_validator.detect_modality(
-            facts, extension=extension_of(image.filename), sensor=image.sensor, source=image.source, hint=image.modality_hint
+        sensor = workflow_validator.sensor_for(image, facts)
+        detected_bands = sorted(band_validator.detect_named_bands(facts, sensor))
+        decision = modality_validator.infer_modality(
+            facts, extension=extension_of(image.filename), sensor_id=sensor, hint=image.modality_hint
         )
+        modality, modality_source = decision.modality, decision.source
     return ValidatedImageInfo(
         imagery_id=image.imagery_id,
         role=image.role,
@@ -142,6 +145,10 @@ def _describe(image: ImageInput, facts: RasterFacts) -> ValidatedImageInfo:
         georeferenced=facts.georeferenced,
         modality=modality,
         detected_bands=detected_bands,
+        sensor=sensor.label if sensor and sensor.status != "unknown" else None,
+        sensor_status=sensor.status if sensor else None,
+        sensor_source=sensor.source if sensor else None,
+        modality_source=modality_source,
     )
 
 

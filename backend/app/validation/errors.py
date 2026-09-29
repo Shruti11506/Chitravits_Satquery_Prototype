@@ -45,12 +45,25 @@ NOT_DISTINCT_OBSERVATIONS = "NOT_DISTINCT_OBSERVATIONS"
 IMAGE_DIMENSION_MISMATCH = "IMAGE_DIMENSION_MISMATCH"  # T1/T2 pixel width/height differ, exact match required
 FILE_FORMAT_MISMATCH = "FILE_FORMAT_MISMATCH"  # T1/T2 raster formats differ (e.g. GeoTIFF vs JPEG)
 CRS_MISMATCH = "CRS_MISMATCH"  # both georeferenced, but to a different CRS -- never auto-reprojected here
-IMAGE_TYPE_MISMATCH = "IMAGE_TYPE_MISMATCH"  # Incompatible image types / modalities for change detection
-UNKNOWN_MODALITY = "UNKNOWN_MODALITY"  # Image modality / type cannot be determined
+# Change detection: T1 and T2 are both of a KNOWN modality, but different ones
+# (e.g. RGB vs SAR). MODALITY_MISMATCH, by contrast, is one image against what
+# a workflow allows, or against its own `modality_hint`. Kept as-is: the
+# frontend and existing clients read it.
+IMAGE_TYPE_MISMATCH = "IMAGE_TYPE_MISMATCH"
+UNKNOWN_MODALITY = "UNKNOWN_MODALITY"  # Image modality / type cannot be determined (reserved; not emitted)
 # Not given a code by name in that brief, but its own section 3 calls this
 # out as a distinct check from IMAGE_DIMENSION_MISMATCH -- kept as its own
 # code rather than overloading IMAGE_DIMENSION_MISMATCH for a different rule.
 ASPECT_RATIO_MISMATCH = "ASPECT_RATIO_MISMATCH"
+
+# Sensor scope (sensors.py): Sentinel-1, Sentinel-2, Cartosat, RISAT.
+UNKNOWN_SENSOR = "UNKNOWN_SENSOR"  # no sensor evidence, and the workflow needs sensor-specific interpretation
+UNSUPPORTED_SENSOR = "UNSUPPORTED_SENSOR"  # a sensor was recognised, but it is outside the supported four
+# SAR polarisations don't satisfy an explicitly configured requirement
+# (`expected_sar_polarizations` / `sar_polarization_policy="single_required"`).
+# A plain T1/T2 polarisation difference stays BAND_MISMATCH, as before.
+POLARIZATION_MISMATCH = "POLARIZATION_MISMATCH"
+DTYPE_MISMATCH = "DTYPE_MISMATCH"  # T1/T2 pixel data types differ (e.g. uint16 vs float32)
 
 ALL_CODES = frozenset({
     UNSUPPORTED_FORMAT, FILE_CORRUPTED, FILE_TOO_LARGE, INVALID_IMAGE, INVALID_DIMENSIONS,
@@ -58,7 +71,8 @@ ALL_CODES = frozenset({
     INVALID_CRS, GEOREFERENCE_MISSING, INVALID_AOI, AOI_OUTSIDE_IMAGE, RESOURCE_LIMIT_EXCEEDED,
     WORKFLOW_INPUT_MISMATCH, UNKNOWN_WORKFLOW, IMAGE_UNAVAILABLE, NOT_DISTINCT_OBSERVATIONS,
     IMAGE_DIMENSION_MISMATCH, FILE_FORMAT_MISMATCH, CRS_MISMATCH, ASPECT_RATIO_MISMATCH,
-    IMAGE_TYPE_MISMATCH, UNKNOWN_MODALITY,
+    IMAGE_TYPE_MISMATCH, UNKNOWN_MODALITY, UNKNOWN_SENSOR, UNSUPPORTED_SENSOR, POLARIZATION_MISMATCH,
+    DTYPE_MISMATCH,
 })
 
 

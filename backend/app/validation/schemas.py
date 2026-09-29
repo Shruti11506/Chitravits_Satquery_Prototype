@@ -13,7 +13,7 @@ package docstring in `__init__.py` for why. Two kinds of shape live here:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 from uuid import UUID
 
@@ -95,6 +95,14 @@ class ValidatedImageInfo(BaseModel):
     georeferenced: bool = False
     modality: Modality = "unknown"
     detected_bands: list[str] = Field(default_factory=list, description="Named bands found, e.g. ['red', 'nir'].")
+    # Added fields (optional, default null): which sensor the evidence names,
+    # and which evidence decided the sensor / modality. See sensors.py.
+    sensor: str | None = Field(
+        default=None, description="'sentinel-1' | 'sentinel-2' | 'cartosat' | 'risat', an unsupported sensor's name, or null."
+    )
+    sensor_status: Literal["supported", "unsupported", "unknown"] | None = None
+    sensor_source: str | None = None
+    modality_source: str | None = None
 
 
 class ValidationResult(BaseModel):
@@ -158,18 +166,62 @@ class ChangeDetectionImageMetadata:
     imagery_id: str | None = None
 
 
+SarPolarizationPolicy = Literal["match_all", "single_required"]
+SarPolarization = Literal["vv", "vh", "hh", "hv"]
+
+
 @dataclass(frozen=True)
 class ChangeDetectionRequirements:
     """`workflow_requirements` -- the configurable knobs section 3/4/7/9 of
     the brief calls for, so a stricter or looser change-detection workflow
-    never means editing the validator itself."""
+    never means editing the validator itself. See CHAT_GATE_REQUIREMENTS /
+    STRICT_REQUIREMENTS below for the two profiles the API uses."""
 
-    aspect_ratio_tolerance: float = 0.01
+    # None disables the aspect-ratio check (reported "skipped", never "pass").
+    aspect_ratio_tolerance: float | None = 0.01
     # False only for a future, non-pixel-registered workflow -- the
     # prototype's own change-detection path needs identical rasters.
     require_exact_dimensions: bool = True
     require_matching_format: bool = True
+    # True: BOTH images must be georeferenced (a JPEG/PNG fails, and the
+    # error names which image). False: see `geospatial_when_present`.
     require_geospatial: bool = True
+    # Only when require_geospatial is False: if EITHER image carries a CRS,
+    # validate both and compare CRSs; if neither does, skip the check.
+    geospatial_when_present: bool = False
+    # UNKNOWN_SENSOR when an image's sensor can't be identified (sensors.py).
+    require_known_sensor: bool = False
+    # UNSUPPORTED_SENSOR when an image is recognisably from another sensor.
+    reject_unsupported_sensor: bool = True
+    # DTYPE_MISMATCH when T1/T2 pixel data types differ. No per-sensor dtype
+    # allowlist -- TODO(team) if a model ever needs one.
+    require_matching_dtype: bool = True
+    # "match_all": T1 and T2 must carry the same polarisation SET (VV+VH <->
+    # VV+VH is fine). "single_required": each image exactly one polarisation.
+    sar_polarization_policy: SarPolarizationPolicy = "match_all"
+    # When set (e.g. ("vv", "vh") for a model trained on VV+VH), each image's
+    # polarisations must equal it, else POLARIZATION_MISMATCH. None = no
+    # model-specific requirement.
+    expected_sar_polarizations: tuple[str, ...] | None = None
+
+    def with_overrides(self, **overrides: Any) -> "ChangeDetectionRequirements":
+        """Copy with every non-None override applied (API request fields)."""
+        values = {key: value for key, value in overrides.items() if value is not None}
+        if "expected_sar_polarizations" in values:
+            values["expected_sar_polarizations"] = tuple(values["expected_sar_polarizations"])
+        return replace(self, **values)
+
+
+# The default for image pairs in the chat -- `POST /analysis` and
+# `POST /validation/change-detection` (which the frontend calls after every
+# pair upload). Demo-friendly: sensor evidence optional, and geospatial
+# checks only when an image actually carries georeferencing, so two plain
+# JPEG/PNG images still pair. Modality, bands, dimensions and dtype are
+# still enforced.
+CHAT_GATE_REQUIREMENTS = ChangeDetectionRequirements(require_geospatial=False, geospatial_when_present=True)
+# Opt-in (`"profile": "strict"`): the sensor must be one of the four
+# supported ones, and both images must be georeferenced.
+STRICT_REQUIREMENTS = ChangeDetectionRequirements(require_geospatial=True, require_known_sensor=True)
 
 
 @dataclass
@@ -219,6 +271,13 @@ class ChangeDetectionIssue(BaseModel):
         return cls(code=code, message=message, t1=t1, t2=t2)
 
 
+class CheckDetail(BaseModel):
+    """One entry of `check_details`: whether a check actually ran, and how."""
+
+    status: Literal["pass", "fail", "skipped"]
+    detail: str | None = None
+
+
 class ChangeDetectionValidationResult(BaseModel):
     """What `change_detection_validator.validate_change_detection_inputs`
     returns -- section 15's `ValidationResult(valid, errors, warnings)`,
@@ -227,7 +286,14 @@ class ChangeDetectionValidationResult(BaseModel):
     valid: bool
     status: Literal["VALID", "REJECT"] = "VALID"
     confidence: str | None = None
+    # Only checks that actually RAN: True = passed, False = failed. A check
+    # that was skipped (disabled, not applicable, or never reached because an
+    # earlier one failed) is absent here -- see check_details for why.
     checks: dict[str, bool] = Field(default_factory=dict)
+    check_details: dict[str, CheckDetail] = Field(default_factory=dict)
+    # The identified bands per image, in the order preprocessing would
+    # receive them (SAR: VV, VH, HH, HV). None when bands weren't compared.
+    ordered_bands: dict[str, list[str]] | None = None
     errors: list[ChangeDetectionIssue] = Field(default_factory=list)
     warnings: list[ChangeDetectionIssue] = Field(default_factory=list)
 
@@ -244,6 +310,11 @@ class ImageSummary(BaseModel):
     height: int | None = None
     aspect_ratio: float | None = None
     crs: str | None = None
+    dtype: str | None = None
+    sensor: str | None = None
+    sensor_status: Literal["supported", "unsupported", "unknown"] | None = None
+    sensor_source: str | None = None
+    sensor_product: str | None = None
 
 
 class ChangeDetectionRequest(BaseModel):
@@ -251,11 +322,30 @@ class ChangeDetectionRequest(BaseModel):
 
     t1_imagery_id: UUID
     t2_imagery_id: UUID
-    # Overrides for ChangeDetectionRequirements' defaults -- None keeps the default.
+    # "chat" (default) = CHAT_GATE_REQUIREMENTS, "strict" = STRICT_REQUIREMENTS.
+    profile: Literal["chat", "strict"] = "chat"
+    # Overrides applied on top of the profile -- None keeps the profile's value.
     aspect_ratio_tolerance: float | None = None
     require_exact_dimensions: bool | None = None
     require_matching_format: bool | None = None
     require_geospatial: bool | None = None
+    require_known_sensor: bool | None = None
+    require_matching_dtype: bool | None = None
+    sar_polarization_policy: SarPolarizationPolicy | None = None
+    expected_sar_polarizations: list[SarPolarization] | None = None
+
+    def requirements(self) -> ChangeDetectionRequirements:
+        base = STRICT_REQUIREMENTS if self.profile == "strict" else CHAT_GATE_REQUIREMENTS
+        return base.with_overrides(
+            aspect_ratio_tolerance=self.aspect_ratio_tolerance,
+            require_exact_dimensions=self.require_exact_dimensions,
+            require_matching_format=self.require_matching_format,
+            require_geospatial=self.require_geospatial,
+            require_known_sensor=self.require_known_sensor,
+            require_matching_dtype=self.require_matching_dtype,
+            sar_polarization_policy=self.sar_polarization_policy,
+            expected_sar_polarizations=self.expected_sar_polarizations,
+        )
 
 
 class ChangeDetectionResponse(BaseModel):
@@ -264,6 +354,8 @@ class ChangeDetectionResponse(BaseModel):
     workflow: str = "change_detection"
     confidence: str | None = None
     checks: dict[str, bool] = Field(default_factory=dict)
+    check_details: dict[str, CheckDetail] = Field(default_factory=dict)
+    ordered_bands: dict[str, list[str]] | None = None
     t1: ImageSummary | None = None
     t2: ImageSummary | None = None
     errors: list[ChangeDetectionIssue] = Field(default_factory=list)

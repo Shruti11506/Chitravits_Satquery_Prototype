@@ -19,7 +19,7 @@ from app.core.exceptions import ValidationAppError
 from app.schemas.analysis import AnalysisCreate
 from app.services import conversation_service, imagery_service, job_service
 from app.validation.change_detection_validator import validate_change_detection_inputs
-from app.validation.schemas import ChangeDetectionRequirements
+from app.validation.schemas import CHAT_GATE_REQUIREMENTS
 
 
 def create_analysis(payload: AnalysisCreate) -> dict:
@@ -58,16 +58,18 @@ def create_analysis(payload: AnalysisCreate) -> dict:
 
 def _reject_incompatible_pair(imagery_id: str, comparison_imagery_id: str) -> None:
     """Runs the same strict, order-stopping compatibility check as
-    `POST /validation/change-detection`, using this milestone's default
-    requirements (identical dimensions, matching raster format, geospatial
-    required -- `ChangeDetectionRequirements()`). Raises ValidationAppError
+    `POST /validation/change-detection`, with the same default chat profile
+    (`CHAT_GATE_REQUIREMENTS`: identical dimensions, matching raster format
+    and dtype; sensor evidence optional; geospatial checks only when an
+    image is actually georeferenced, so plain JPEG/PNG pairs still work).
+    Raises ValidationAppError
     (422) on the FIRST failing check, with the full failure list plus a
     T1/T2 summary attached as `error.details` for the frontend to render
     the rich "Invalid Input" message without a second round trip."""
     t1 = imagery_service.build_change_detection_metadata(imagery_id, "T1")
     t2 = imagery_service.build_change_detection_metadata(comparison_imagery_id, "T2")
 
-    result = validate_change_detection_inputs(t1, t2, ChangeDetectionRequirements())
+    result = validate_change_detection_inputs(t1, t2, CHAT_GATE_REQUIREMENTS)
     if result.valid:
         return
 

@@ -1,69 +1,130 @@
 """Modality / Sensor Compatibility (task brief section 5).
 
 Determines what kind of image this is -- "rgb", "optical", "multispectral",
-"sar", or "unknown" -- and never from the filename. In order of trust:
+"sar", or "unknown" -- from EVIDENCE, never from the filename directly
+(`sensors.identify_sensor` may use a filename to name the sensor; the
+modality then follows from that sensor or from the raster's own bands):
 
-1. An explicit `modality_hint` on the request (the caller states it).
-2. The raster's own band names/colour-interpretation (real structure).
-3. `sensor`/`source` -- structured metadata columns filled in at upload
-   time (a form field the user typed a sensor name into), which is
-   "uploaded metadata" in the brief's sense, NOT the filename. Only
-   consulted for the cases band structure alone couldn't resolve, and only
-   against a small, explicit term list -- never a fuzzy guess.
+1. Identified bands (`band_validator.detect_named_bands`, sensor-aware):
+   any SAR polarisation -> "sar"; any band only a multispectral sensor has
+   (NIR, SWIR, red-edge, ...) -> "multispectral".
+2. The identified sensor, unless it was identified from the filename alone:
+   Sentinel-1 / RISAT -> "sar"; Sentinel-2 -> "multispectral"; Cartosat ->
+   "optical" (PAN, or MX without band metadata; MX bands named NIR etc.
+   already hit rule 1).
+3. Red+green+blue identified -> "rgb"; a decoded JPEG/PNG -> "rgb".
+4. Nothing else -> "unknown". A raster is NOT "multispectral" just because
+   it has more than three bands -- an unnamed 4-band raster stays unknown.
 
-If none of that identifies a modality a required workflow needs,
-`detect_modality` returns "unknown" rather than guessing, and
-`modality_issues` rejects with MODALITY_MISMATCH (brief section 5: "If
-modality cannot be reliably established when it is required, return a
-validation error instead of guessing").
+`modality_hint` is validated, not trusted: with no evidence it is accepted
+(`source="hint"`); consistent with the evidence it is accepted (and may
+refine a generic "optical"); contradicting the evidence (e.g. a Sentinel-1
+VV raster hinted "optical") it is a MODALITY_MISMATCH naming both values.
+
+If a required workflow needs a modality that can't be established,
+`modality_issues` rejects with MODALITY_MISMATCH rather than guessing
+(brief section 5).
 """
 from __future__ import annotations
 
-import re
+from dataclasses import dataclass
 
-from app.validation.band_validator import detect_named_bands
+from app.validation.band_validator import SAR_POLARIZATIONS, detect_named_bands
 from app.validation.errors import MODALITY_MISMATCH, ValidationIssue
 from app.validation.raster_validator import PILLOW_EXTENSIONS
 from app.validation.schemas import Modality, RasterFacts
+from app.validation.sensors import SAR_FAMILIES, SensorFamily, SensorIdentification, identify_sensor
 
-_SAR_TERMS = re.compile(r"\b(sar|radar|sentinel[- ]?1|s1[ab]?|grd|slc|risat|iceye|capella|terrasar)\b", re.IGNORECASE)
-_OPTICAL_TERMS = re.compile(
-    r"\b(optical|rgb|sentinel[- ]?2|s2[ab]?|msi|landsat|cartosat|worldview|pleiades|planetscope)\b", re.IGNORECASE
-)
+_SAR_BANDS = frozenset(SAR_POLARIZATIONS)
+# Bands an RGB camera doesn't have -- their presence means a multispectral sensor.
+_MULTISPECTRAL_BANDS = frozenset({
+    "coastal", "red_edge_1", "red_edge_2", "red_edge_3", "nir", "nir_narrow",
+    "water_vapour", "cirrus", "swir1", "swir2",
+})
 
-_SAR_BANDS = frozenset({"vv", "vh", "hh", "hv"})
-_MULTISPECTRAL_BANDS = frozenset({"nir", "swir1", "swir2"})
+# hint -> evidence values it is consistent with.
+_HINT_COMPATIBLE: dict[str, frozenset[str]] = {
+    "optical": frozenset({"optical", "rgb", "multispectral"}),
+    "rgb": frozenset({"rgb", "optical"}),
+    "multispectral": frozenset({"multispectral", "optical"}),
+    "sar": frozenset({"sar"}),
+    "optical_sar": frozenset({"optical", "rgb", "multispectral", "sar", "optical_sar"}),  # not judgeable per image
+}
 
 
-def detect_modality(facts: RasterFacts, *, extension: str, sensor: str | None, source: str | None, hint: str | None) -> Modality:
-    if hint:
-        return hint
+@dataclass(frozen=True)
+class ModalityDecision:
+    modality: Modality
+    source: str  # "bands" | "sensor" | "file_type" | "hint" | "none"
+    evidence: Modality = "unknown"  # what the evidence alone says
+    hint: str | None = None
+    hint_conflict: bool = False
 
-    detected_bands = detect_named_bands(facts)
-    if detected_bands.keys() & _SAR_BANDS:
-        return "sar"
-    if detected_bands.keys() & _MULTISPECTRAL_BANDS:
-        return "multispectral"
-    if facts.band_count and facts.band_count > 3:
-        return "multispectral"
-    if {"red", "green", "blue"} <= detected_bands.keys():
-        return "rgb"
+
+def _evidence(facts: RasterFacts, *, extension: str, sensor_id: SensorIdentification) -> tuple[Modality, str]:
+    bands = detect_named_bands(facts, sensor_id).keys()
+    if bands & _SAR_BANDS:
+        return "sar", "bands"
+    if bands & _MULTISPECTRAL_BANDS:
+        return "multispectral", "bands"
+    # A sensor known only from the FILENAME may select a band table, but never
+    # decides modality on its own (a JPEG named "S1A_IW_GRDH_..." is not SAR).
+    if sensor_id.is_supported and sensor_id.source != "filename":
+        if sensor_id.family in SAR_FAMILIES:
+            return "sar", "sensor"
+        if sensor_id.family == SensorFamily.SENTINEL_2:
+            return "multispectral", "sensor"
+        if sensor_id.family == SensorFamily.CARTOSAT:
+            return "optical", "sensor"
+    if {"red", "green", "blue"} <= bands:
+        return "rgb", "bands"
     if extension in PILLOW_EXTENSIONS:
-        return "rgb"  # a decoded JPEG/PNG pixel buffer is RGB by construction
+        return "rgb", "file_type"  # a decoded JPEG/PNG pixel buffer is RGB/greyscale by construction
+    return "unknown", "none"
 
-    # Structural signal alone is exhausted; fall back to explicit,
-    # user-entered sensor metadata or dataset tags for ambiguous cases
-    tags_text = " ".join(facts.tags.values()) if getattr(facts, "tags", None) else ""
-    metadata_text = " ".join(filter(None, (sensor, source, tags_text)))
-    if metadata_text:
-        if facts.band_count and facts.band_count <= 2 and _SAR_TERMS.search(metadata_text):
-            return "sar"
-        if facts.band_count and facts.band_count <= 3 and _OPTICAL_TERMS.search(metadata_text):
-            return "optical"
-        if facts.band_count and facts.band_count > 3 and _OPTICAL_TERMS.search(metadata_text):
-            return "multispectral"
 
-    return "unknown"
+def infer_modality(
+    facts: RasterFacts, *, extension: str, sensor_id: SensorIdentification, hint: str | None
+) -> ModalityDecision:
+    evidence, source = _evidence(facts, extension=extension, sensor_id=sensor_id)
+    if not hint:
+        return ModalityDecision(evidence, source, evidence)
+    if evidence == "unknown":
+        return ModalityDecision(hint, "hint", evidence, hint)
+    if evidence not in _HINT_COMPATIBLE.get(hint, frozenset()):
+        return ModalityDecision(evidence, source, evidence, hint, hint_conflict=True)
+    if evidence == "optical" and hint in ("rgb", "multispectral"):
+        return ModalityDecision(hint, "hint", evidence, hint)  # the hint refines a generic "optical"
+    return ModalityDecision(evidence, source, evidence, hint)
+
+
+def detect_modality(
+    facts: RasterFacts,
+    *,
+    extension: str,
+    sensor: str | None,
+    source: str | None,
+    hint: str | None,
+    filename: str | None = None,
+    sensor_id: SensorIdentification | None = None,
+) -> Modality:
+    """Backward-compatible string form of `infer_modality`. On a hint that
+    contradicts the evidence this returns the EVIDENCE value -- report the
+    conflict itself with `hint_conflict_issue`."""
+    if sensor_id is None:
+        sensor_id = identify_sensor(sensor=sensor, source=source, filename=filename, facts=facts)
+    return infer_modality(facts, extension=extension, sensor_id=sensor_id, hint=hint).modality
+
+
+def hint_conflict_issue(decision: ModalityDecision, *, input_label: str) -> ValidationIssue | None:
+    if not decision.hint_conflict:
+        return None
+    return ValidationIssue.of(
+        MODALITY_MISMATCH,
+        f"The modality hint '{decision.hint}' contradicts this image's own metadata, which identifies it "
+        f"as '{decision.evidence}'.",
+        input=input_label,
+    )
 
 
 def modality_issues(

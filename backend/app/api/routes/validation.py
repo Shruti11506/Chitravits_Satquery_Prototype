@@ -20,7 +20,6 @@ from app.services import imagery_service
 from app.validation.change_detection_validator import validate_change_detection_inputs
 from app.validation.schemas import (
     ChangeDetectionRequest,
-    ChangeDetectionRequirements,
     ChangeDetectionResponse,
     ValidationRequest,
     ValidationResult,
@@ -56,21 +55,18 @@ def validate_change_detection(payload: ChangeDetectionRequest) -> ApiResponse[Ch
     t1 = imagery_service.build_change_detection_metadata(str(payload.t1_imagery_id), "T1")
     t2 = imagery_service.build_change_detection_metadata(str(payload.t2_imagery_id), "T2")
 
-    defaults = ChangeDetectionRequirements()
-    requirements = ChangeDetectionRequirements(
-        aspect_ratio_tolerance=payload.aspect_ratio_tolerance if payload.aspect_ratio_tolerance is not None else defaults.aspect_ratio_tolerance,
-        require_exact_dimensions=payload.require_exact_dimensions if payload.require_exact_dimensions is not None else defaults.require_exact_dimensions,
-        require_matching_format=payload.require_matching_format if payload.require_matching_format is not None else defaults.require_matching_format,
-        require_geospatial=payload.require_geospatial if payload.require_geospatial is not None else defaults.require_geospatial,
-    )
-
-    result = validate_change_detection_inputs(t1, t2, requirements)
+    # Default profile "chat" = the same CHAT_GATE_REQUIREMENTS `POST /analysis`
+    # applies (the frontend calls this endpoint after every pair upload);
+    # "profile": "strict" opts into STRICT_REQUIREMENTS. Field overrides on top.
+    result = validate_change_detection_inputs(t1, t2, payload.requirements())
     first_error = result.errors[0] if result.errors else None
     response = ChangeDetectionResponse(
         status="VALID" if result.valid else "REJECT",
         valid=result.valid,
         confidence=result.confidence,
         checks=result.checks,
+        check_details=result.check_details,
+        ordered_bands=result.ordered_bands,
         t1=imagery_service.change_detection_image_summary(t1),
         t2=imagery_service.change_detection_image_summary(t2),
         errors=result.errors,

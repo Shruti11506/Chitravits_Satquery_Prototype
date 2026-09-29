@@ -39,9 +39,16 @@ def test_rgb_jpeg_is_detected_as_rgb():
     assert modality_validator.detect_modality(_jpeg_facts(), extension=".jpg", sensor=None, source=None, hint=None) == "rgb"
 
 
-def test_sentinel2_style_multispectral_geotiff_is_detected():
+def test_many_bands_alone_do_not_make_an_image_multispectral():
+    # Previously band_count > 3 -> "multispectral". A 13-band raster whose
+    # band names mean nothing without a known sensor stays unknown.
     facts = raster_validator.extract_from_bytes(_geotiff(count=13, descriptions=["b1"] * 13), "s2.tif")
-    assert modality_validator.detect_modality(facts, extension=".tif", sensor=None, source=None, hint=None) == "multispectral"
+    assert modality_validator.detect_modality(facts, extension=".tif", sensor=None, source=None, hint=None) == "unknown"
+
+
+def test_sentinel2_multispectral_geotiff_is_detected_from_sensor_evidence():
+    facts = raster_validator.extract_from_bytes(_geotiff(count=13, descriptions=["b1"] * 13), "s2.tif")
+    assert modality_validator.detect_modality(facts, extension=".tif", sensor="Sentinel-2B", source=None, hint=None) == "multispectral"
 
 
 def test_sar_vv_geotiff_is_detected_from_band_description_not_filename():

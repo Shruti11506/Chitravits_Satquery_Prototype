@@ -13,9 +13,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.validation import band_validator, geospatial_validator, modality_validator
-from app.validation.errors import IMAGE_COUNT_MISMATCH, NOT_DISTINCT_OBSERVATIONS, UNKNOWN_WORKFLOW, WORKFLOW_INPUT_MISMATCH, ValidationIssue
+from app.validation.change_detection_validator import validate_change_detection_inputs
+from app.validation.errors import (
+    IMAGE_COUNT_MISMATCH,
+    NOT_DISTINCT_OBSERVATIONS,
+    UNKNOWN_SENSOR,
+    UNKNOWN_WORKFLOW,
+    UNSUPPORTED_SENSOR,
+    WORKFLOW_INPUT_MISMATCH,
+    ValidationIssue,
+)
 from app.validation.raster_validator import extension_of
-from app.validation.schemas import ImageInput, RasterFacts
+from app.validation.schemas import ChangeDetectionImageMetadata, ChangeDetectionRequirements, ImageInput, RasterFacts
+from app.validation.sensors import SensorIdentification, identify_sensor
 
 
 @dataclass(frozen=True)
@@ -38,6 +48,15 @@ class WorkflowRequirements:
     # ["optical", "sar"]. None = role-agnostic (a single-image workflow, or
     # one that doesn't care which role label was sent).
     required_roles: list[str] | None = None
+    # True for workflows whose band interpretation depends on the sensor
+    # (band math such as NDVI): an image whose sensor can't be identified is
+    # UNKNOWN_SENSOR, one from an out-of-scope sensor UNSUPPORTED_SENSOR.
+    # Other workflows (VQA, captioning, ...) ignore the sensor entirely.
+    requires_known_sensor: bool = False
+    # Set for a T1/T2 change workflow that must go through the dedicated
+    # change-detection validator (change_detection_validator.py) instead of
+    # the per-image checks below -- so it can't be used to bypass it.
+    change_detection: ChangeDetectionRequirements | None = None
 
 
 # The compatibility matrix from the task brief, expressed declaratively.
@@ -52,8 +71,10 @@ WORKFLOW_REGISTRY: dict[str, WorkflowRequirements] = {
     "ndvi": WorkflowRequirements(
         display_name="NDVI",
         required_images=1,
-        allowed_modalities=["optical", "rgb", "multispectral"],
-        required_bands=[["red", "nir"]],
+        # Not "rgb": a plain RGB image has no NIR band.
+        allowed_modalities=["optical", "multispectral"],
+        required_bands=[["red", "nir"]],  # Sentinel-2 B8A (nir_narrow) also satisfies "nir"
+        requires_known_sensor=True,
     ),
     "sar_vv_analysis": WorkflowRequirements(
         display_name="SAR VV analysis", required_images=1, allowed_modalities=["sar"], required_bands=[["vv"]]
@@ -62,7 +83,10 @@ WORKFLOW_REGISTRY: dict[str, WorkflowRequirements] = {
         display_name="SAR VH analysis", required_images=1, allowed_modalities=["sar"], required_bands=[["vh"]]
     ),
     "bitemporal_change": WorkflowRequirements(
-        display_name="Bi-temporal change analysis", required_images=2, required_roles=["t1", "t2"]
+        display_name="Bi-temporal change analysis",
+        required_images=2,
+        required_roles=["t1", "t2"],
+        change_detection=ChangeDetectionRequirements(),
     ),
     "sar_change_vv": WorkflowRequirements(
         display_name="SAR VV change analysis",
@@ -141,26 +165,87 @@ def compatibility_issues(
     correct -- `images`, `facts` and `workflow.required_bands` (when set)
     are all the same length here.
     """
+    if workflow.change_detection is not None:
+        return _change_detection_issues(workflow, images, facts)
+
     issues: list[ValidationIssue] = []
     geospatial_required = workflow.requires_geospatial or aoi_present
+    sensors = [sensor_for(image, image_facts) for image, image_facts in zip(images, facts)]
 
-    for image, image_facts in zip(images, facts):
+    for image, image_facts, sensor in zip(images, facts, sensors):
         label = image.imagery_id or image.filename
+        if workflow.requires_known_sensor:
+            issues.extend(sensor_issues(sensor, workflow_label=workflow.display_name, input_label=label))
+
         issues.extend(geospatial_validator.geospatial_issues(
             image_facts, input_label=label, required=geospatial_required, extension=extension_of(image.filename)
         ))
 
-        detected = modality_validator.detect_modality(
-            image_facts, extension=extension_of(image.filename), sensor=image.sensor, source=image.source, hint=image.modality_hint
+        decision = modality_validator.infer_modality(
+            image_facts, extension=extension_of(image.filename), sensor_id=sensor, hint=image.modality_hint
         )
-        issues.extend(modality_validator.modality_issues(
-            detected, workflow.allowed_modalities, role=image.role, workflow_label=workflow.display_name, input_label=label
-        ))
+        conflict = modality_validator.hint_conflict_issue(decision, input_label=label)
+        if conflict:
+            issues.append(conflict)
+        else:
+            issues.extend(modality_validator.modality_issues(
+                decision.modality, workflow.allowed_modalities, role=image.role,
+                workflow_label=workflow.display_name, input_label=label,
+            ))
 
     if workflow.required_bands and any(workflow.required_bands):
         labels = [image.imagery_id or image.filename for image in images]
         issues.extend(band_validator.positional_band_issues(
-            list(zip(labels, facts)), workflow.required_bands, workflow_label=workflow.display_name
+            list(zip(labels, facts)), workflow.required_bands, workflow_label=workflow.display_name, sensors=sensors
         ))
 
+    return issues
+
+
+def sensor_for(image: ImageInput, facts: RasterFacts) -> SensorIdentification:
+    return identify_sensor(sensor=image.sensor, source=image.source, filename=image.filename, facts=facts)
+
+
+def sensor_issues(sensor: SensorIdentification, *, workflow_label: str, input_label: str) -> list[ValidationIssue]:
+    if sensor.status == "unsupported":
+        return [ValidationIssue.of(
+            UNSUPPORTED_SENSOR,
+            f"This image is from '{sensor.raw_value}', which is not a supported sensor "
+            "(Sentinel-1, Sentinel-2, Cartosat, RISAT).",
+            input=input_label,
+        )]
+    if sensor.status == "unknown":
+        return [ValidationIssue.of(
+            UNKNOWN_SENSOR,
+            f"{workflow_label} needs to know which sensor produced this image (Sentinel-1, Sentinel-2, Cartosat or "
+            "RISAT) to interpret its bands, and none was found in its metadata or filename.",
+            input=input_label,
+        )]
+    return []
+
+
+def _change_detection_issues(
+    workflow: WorkflowRequirements, images: list[ImageInput], facts: list[RasterFacts]
+) -> list[ValidationIssue]:
+    """The dedicated T1/T2 validator, for a change workflow in the generic
+    registry. It stops at its first failing check; that issue is returned,
+    labelled with the image it is about when it names only one."""
+    by_role = {image.role: (image, image_facts) for image, image_facts in zip(images, facts)}
+    metadata = {}
+    for role, label in (("t1", "T1"), ("t2", "T2")):
+        image, image_facts = by_role[role]
+        metadata[role] = ChangeDetectionImageMetadata(
+            label=label, facts=image_facts, extension=extension_of(image.filename), filename=image.filename,
+            sensor=image.sensor, source=image.source, modality_hint=image.modality_hint, imagery_id=image.imagery_id,
+        )
+    result = validate_change_detection_inputs(metadata["t1"], metadata["t2"], workflow.change_detection)
+    issues = []
+    for error in result.errors:
+        if error.t1 is not None and error.t2 is None:
+            image_label = by_role["t1"][0].imagery_id or by_role["t1"][0].filename
+        elif error.t2 is not None and error.t1 is None:
+            image_label = by_role["t2"][0].imagery_id or by_role["t2"][0].filename
+        else:
+            image_label = None
+        issues.append(ValidationIssue.of(error.code, error.message, input=image_label))
     return issues
