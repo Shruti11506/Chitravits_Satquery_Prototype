@@ -9,16 +9,16 @@ def _facts(descriptions):
 
 
 def test_detects_named_bands_case_insensitively():
-    assert band_validator.detect_named_bands(_facts(["Red", "GREEN", "blue", "NIR"])) == {"red": 1, "green": 2, "blue": 3, "nir": 4}
+    assert band_validator.detect_named_bands(_facts(["Red", "GREEN", "blue", "NIR"]), None) == {"red": 1, "green": 2, "blue": 3, "nir": 4}
 
 
 def test_undescribed_bands_are_not_guessed():
-    assert band_validator.detect_named_bands(_facts(["", None, "unknown_tag"])) == {}
+    assert band_validator.detect_named_bands(_facts(["", None, "unknown_tag"]), None) == {}
 
 
 def test_red_green_blue_detected_via_colorinterp_when_undescribed():
     facts = RasterFacts(format="GeoTIFF", width=1, height=1, band_count=3, color_interpretation=["red", "green", "blue"])
-    assert band_validator.detect_named_bands(facts) == {"red": 1, "green": 2, "blue": 3}
+    assert band_validator.detect_named_bands(facts, None) == {"red": 1, "green": 2, "blue": 3}
 
 
 # ---- NDVI: Red + NIR (single image) --------------------------------------------

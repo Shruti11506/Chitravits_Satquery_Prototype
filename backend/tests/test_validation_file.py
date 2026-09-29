@@ -7,7 +7,13 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 from app.validation import file_validator, raster_validator
-from app.validation.errors import FILE_CORRUPTED, FILE_TOO_LARGE, INVALID_DIMENSIONS, UNSUPPORTED_FORMAT
+from app.validation.errors import (
+    FILE_CORRUPTED,
+    FILE_TOO_LARGE,
+    FILE_TYPE_MISMATCH,
+    INVALID_DIMENSIONS,
+    UNSUPPORTED_FILE_TYPE,
+)
 from app.validation.schemas import ImageInput
 
 
@@ -70,14 +76,14 @@ def test_valid_png_passes_format_check():
 @pytest.mark.parametrize("filename", ["document.pdf", "unknown.exe", "scene.bmp"])
 def test_unsupported_extension_is_rejected(filename):
     issues = file_validator.format_issues(_image(filename, b"whatever bytes"))
-    assert [i.code for i in issues] == [UNSUPPORTED_FORMAT]
+    assert [i.code for i in issues] == [UNSUPPORTED_FILE_TYPE]
 
 
 def test_content_not_matching_extension_is_rejected_before_opening():
     # A text file renamed to .tif: wrong magic bytes, caught without ever
     # handing it to rasterio.
     issues = file_validator.format_issues(_image("scene.tif", b"not actually a tiff"))
-    assert [i.code for i in issues] == [FILE_CORRUPTED]
+    assert [i.code for i in issues] == [FILE_TYPE_MISMATCH]
 
 
 def test_oversized_file_is_rejected(monkeypatch):

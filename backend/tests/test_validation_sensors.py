@@ -1,8 +1,9 @@
-"""Sensor-aware input validation (Sentinel-1 / Sentinel-2 / Cartosat / RISAT):
-sensor identification, sensor-specific band tables, evidence-based modality,
-the SAR polarisation policy, dtype, geospatial per image, the chat vs strict
-change-detection profiles, and `check_details`. No network, no model."""
+"""Input validation for Sentinel-1 / Sentinel-2 / Cartosat / RISAT:
+file validation, sensor identification, Sentinel-2 band validation, the
+Cartosat band config, evidence-based modality, and the change-detection
+validator (incl. same-image detection). No network, no model."""
 import io
+import pathlib
 
 import numpy as np
 import pytest
@@ -10,19 +11,26 @@ from PIL import Image
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
-from app.validation import band_validator, modality_validator, raster_validator
+from app.validation import band_validator, file_validator, modality_validator, raster_validator
 from app.validation.change_detection_validator import validate_change_detection_inputs
 from app.validation.errors import (
+    ALL_CODES,
     BAND_MISMATCH,
     BAND_MISSING,
     CRS_MISSING,
     DTYPE_MISMATCH,
+    EMPTY_FILE,
+    FILE_CORRUPTED,
+    FILE_TOO_LARGE,
+    FILE_TYPE_MISMATCH,
     GEOREFERENCE_MISSING,
-    IMAGE_DIMENSION_MISMATCH,
-    IMAGE_TYPE_MISMATCH,
+    INVALID_DIMENSIONS,
     MODALITY_MISMATCH,
-    POLARIZATION_MISMATCH,
+    NOT_DISTINCT_OBSERVATIONS,
+    SAME_ACQUISITION_TIME,
     UNKNOWN_SENSOR,
+    UNSUPPORTED_DTYPE,
+    UNSUPPORTED_FILE_TYPE,
     UNSUPPORTED_SENSOR,
 )
 from app.validation.schemas import (
@@ -35,22 +43,28 @@ from app.validation.schemas import (
 )
 from app.validation.sensors import SensorFamily, identify_sensor
 from app.validation.service import validate_images
+from tests.images import unique_color, unique_fill
 
 S2_NAME = "S2A_MSIL2A_20240101T050211_N0510_R020_T43PGQ_20240101T081000.tif"
 S1_NAME = "S1A_IW_GRDH_1SDV_20240101T004016_20240101T004041_051900_064526_1A2B.tif"
+LANDSAT_NAME = "LC08_L2SP_144051_20240101_20240110_02_T1.tif"
+S2_BANDS = ["B02", "B03", "B04", "B08"]
 
 
 # ---- fixtures ---------------------------------------------------------------------
 
 
-def _geotiff(*, descriptions=(), count=None, dtype="uint16", crs="EPSG:32643", width=64, height=48, tags=None):
+def _geotiff(*, descriptions=(), count=None, dtype="uint16", crs="EPSG:32643", width=64, height=48,
+             tags=None, fill=None, compress=None):
     count = count if count is not None else (len(descriptions) or 1)
+    value = unique_fill() if fill is None else fill
+    profile = dict(driver="GTiff", width=width, height=height, count=count, dtype=dtype, crs=crs,
+                   transform=from_origin(776000, 1440000, 10, 10))
+    if compress:
+        profile["compress"] = compress
     with MemoryFile() as mem:
-        with mem.open(
-            driver="GTiff", width=width, height=height, count=count, dtype=dtype,
-            crs=crs, transform=from_origin(776000, 1440000, 10, 10),
-        ) as dst:
-            dst.write(np.zeros((count, height, width), dtype=dtype))
+        with mem.open(**profile) as dst:
+            dst.write(np.full((count, height, width), value, dtype=dtype))
             for i, name in enumerate(descriptions, start=1):
                 dst.set_band_description(i, name)
             if tags:
@@ -58,24 +72,18 @@ def _geotiff(*, descriptions=(), count=None, dtype="uint16", crs="EPSG:32643", w
         return mem.read()
 
 
-def _plain_tiff(*, count=1, dtype="uint16", width=64, height=48):
-    with MemoryFile() as mem:
-        with mem.open(driver="GTiff", width=width, height=height, count=count, dtype=dtype) as dst:
-            dst.write(np.zeros((count, height, width), dtype=dtype))
-        return mem.read()
-
-
-def _image_bytes(fmt, width=64, height=48):
+def _image_bytes(fmt, width=64, height=48, color=None):
     buf = io.BytesIO()
-    Image.new("RGB", (width, height), color=(10, 20, 30)).save(buf, format=fmt)
+    Image.new("RGB", (width, height), color=color or unique_color()).save(buf, format=fmt)
     return buf.getvalue()
 
 
-def _meta(label, content, filename, *, sensor=None, hint=None, imagery_id=None) -> ChangeDetectionImageMetadata:
+def _meta(label, content, filename, *, sensor=None, hint=None, imagery_id=None, with_bytes=True, **extra):
     image = ImageInput(filename=filename, content_type=None, content=content, size_bytes=len(content))
     return ChangeDetectionImageMetadata(
         label=label, facts=raster_validator.resolve_facts(image), extension=raster_validator.extension_of(filename),
         filename=filename, sensor=sensor, modality_hint=hint, imagery_id=imagery_id or label,
+        content=content if with_bytes else None, **extra,
     )
 
 
@@ -90,7 +98,86 @@ def _facts(descriptions, **kw):
     return RasterFacts(format="GeoTIFF", width=10, height=10, band_count=len(descriptions), band_descriptions=descriptions, **kw)
 
 
-# ---- sensor identification ---------------------------------------------------------
+def _cd(t1, t2, reqs=CHAT_GATE_REQUIREMENTS):
+    return validate_change_detection_inputs(t1, t2, reqs)
+
+
+# ==== 1. File validation (cases 1-5, plus MIME / dimensions / dtype / digests) =====
+
+
+def test_1_empty_file():
+    assert [i.code for i in file_validator.validate_file("scene.tif", b"").issues] == [EMPTY_FILE]
+
+
+def test_2_png_whose_bytes_are_jpeg():
+    result = file_validator.validate_file("photo.png", _image_bytes("JPEG"))
+    assert [i.code for i in result.issues] == [FILE_TYPE_MISMATCH]
+    assert "JPEG" in result.issues[0].message
+
+
+def test_3_truncated_tiff_is_corrupt():
+    result = file_validator.validate_file("broken.tif", _geotiff()[:200])
+    assert [i.code for i in result.issues] == [FILE_CORRUPTED]
+
+
+@pytest.mark.parametrize("filename", ["setup.exe", "report.pdf"])
+def test_4_unsupported_extension(filename):
+    assert [i.code for i in file_validator.validate_file(filename, b"MZ whatever").issues] == [UNSUPPORTED_FILE_TYPE]
+
+
+def test_5_file_over_the_size_limit(monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "MAX_UPLOAD_SIZE_MB", 0)
+    assert [i.code for i in file_validator.validate_file("scene.tif", _geotiff()).issues] == [FILE_TOO_LARGE]
+
+
+def test_declared_mime_must_match_the_content():
+    result = file_validator.validate_file("photo.jpg", _image_bytes("JPEG"), "image/png")
+    assert [i.code for i in result.issues] == [FILE_TYPE_MISMATCH]
+    # A generic declared type says nothing and is ignored.
+    assert file_validator.validate_file("photo.jpg", _image_bytes("JPEG"), "application/octet-stream").valid
+
+
+def test_pixel_ceiling_is_invalid_dimensions(monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "VALIDATION_MAX_PIXELS", 100)
+    assert [i.code for i in file_validator.validate_file("scene.tif", _geotiff()).issues] == [INVALID_DIMENSIONS]
+
+
+def test_unsupported_dtype():
+    result = file_validator.validate_file("scene.tif", _geotiff(dtype="float64"))
+    assert [i.code for i in result.issues] == [UNSUPPORTED_DTYPE]
+    assert "float64" in result.issues[0].message
+
+
+@pytest.mark.parametrize("filename,fmt", [("photo.webp", "WEBP"), ("photo.png", "PNG"), ("photo.jpg", "JPEG")])
+def test_supported_images_pass(filename, fmt):
+    assert file_validator.validate_file(filename, _image_bytes(fmt)).valid
+
+
+def test_digests_are_computed_and_pixel_digest_ignores_file_metadata():
+    plain = _geotiff(fill=7)
+    retagged = _geotiff(fill=7, tags={"NOTE": "re-saved"}, compress="deflate")
+    a, b = file_validator.validate_file("a.tif", plain), file_validator.validate_file("b.tif", retagged)
+    assert a.sha256 and b.sha256 and a.sha256 != b.sha256  # different bytes...
+    assert a.pixel_sha256 == b.pixel_sha256  # ...same pixels
+    assert set(a.digests()) == {"sha256", "pixel_sha256"}
+
+
+def test_upload_rejects_a_mismatched_file_and_stores_digests(client, fake_supabase):
+    bad = client.post("/api/v1/imagery/upload", files={"file": ("photo.png", _image_bytes("JPEG"), "image/png")})
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == FILE_TYPE_MISMATCH
+    assert fake_supabase.storage.objects == {}
+
+    content = _geotiff()
+    ok = client.post("/api/v1/imagery/upload", files={"file": ("scene.tif", content, "image/tiff")})
+    assert ok.status_code == 201
+    metadata = fake_supabase.store["imagery"][0]["metadata"]
+    assert metadata["sha256"] == file_validator.sha256_of(content)
+    assert metadata["pixel_sha256"]
+
+
+# ==== 2. Sensor identification ===============================================================
 
 
 @pytest.mark.parametrize("kwargs,family,source", [
@@ -107,9 +194,7 @@ def _facts(descriptions, **kw):
 ])
 def test_supported_sensors_are_identified_with_their_evidence(kwargs, family, source):
     found = identify_sensor(**kwargs)
-    assert found.status == "supported"
-    assert found.family == family
-    assert found.source == source
+    assert (found.status, found.family, found.source) == ("supported", family, source)
 
 
 def test_explicit_sensor_field_outranks_the_filename():
@@ -117,74 +202,104 @@ def test_explicit_sensor_field_outranks_the_filename():
     assert found.family == SensorFamily.RISAT and found.source == "db_sensor"
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"filename": "LC08_L2SP_144051_20240101_20240110_02_T1.tif"},
-    {"sensor": "Landsat 8"},
-    {"sensor": "WorldView-3"},
-    {"source": "ICEYE"},
-])
-def test_out_of_scope_sensors_are_unsupported(kwargs):
-    found = identify_sensor(**kwargs)
-    assert found.status == "unsupported"
-    assert found.family is None
+@pytest.mark.parametrize("kwargs", [{"filename": LANDSAT_NAME}, {"sensor": "Landsat 8"}, {"sensor": "WorldView-3"}])
+def test_24_out_of_scope_sensors_are_unsupported(kwargs):
+    assert identify_sensor(**kwargs).status == "unsupported"
 
 
-def test_no_evidence_is_unknown_not_guessed():
-    # "s1.tif" / "B4" alone are not evidence of anything.
+def test_no_evidence_is_unknown():
     assert identify_sensor(filename="s1.tif", facts=_facts(["B4"])).status == "unknown"
 
 
-def test_products_are_only_reported_when_stated():
-    assert identify_sensor(filename=S2_NAME).product == "S2 L2A"
-    assert identify_sensor(filename=S1_NAME).product == "S1 GRD"
-    assert identify_sensor(sensor="Cartosat-3").product is None
+# ==== 3. Bands: Sentinel-2 validator + Cartosat config (cases 6-12) ==============================
 
 
-# ---- sensor-specific band tables -----------------------------------------------------
-
-
-def test_sentinel2_band_ids_map_through_the_sentinel2_table():
-    s2 = identify_sensor(sensor="Sentinel-2")
-    bands = band_validator.detect_named_bands(_facts(["B02", "B03", "B04", "B08", "B8A", "B11"]), s2)
+def test_6_s2_band_b04_is_red():
+    bands = band_validator.detect_named_bands(_facts(["B02", "B03", "B04", "B08", "B8A", "B11"]), identify_sensor(sensor="Sentinel-2"))
     assert bands == {"blue": 1, "green": 2, "red": 3, "nir": 4, "nir_narrow": 5, "swir1": 6}
-    assert band_validator.detect_named_bands(_facts(["B4"]), s2) == {"red": 1}  # B4 and B04 both accepted
+    assert band_validator.detect_named_bands(_facts(["B4"]), identify_sensor(sensor="Sentinel-2")) == {"red": 1}
 
 
-def test_band_ids_are_not_interpreted_for_an_unknown_sensor():
+@pytest.mark.parametrize("count,expected_first,expected_last", [
+    (13, "coastal", "swir2"), (12, "coastal", "swir2"), (4, "blue", "nir"),
+])
+def test_7_unnamed_s2_bands_map_positionally(count, expected_first, expected_last):
+    facts = raster_validator.extract_from_bytes(_geotiff(count=count), "scene.tif")
+    bands = band_validator.detect_named_bands(facts, identify_sensor(sensor="Sentinel-2A"))
+    order = band_validator.ordered_bands(bands)
+    assert len(order) == count and order[0] == expected_first and order[-1] == expected_last
+    if count == 12:
+        assert "cirrus" not in bands  # L2A has no B10
+
+
+def test_positional_mapping_needs_non_filename_sensor_evidence_and_an_exact_count():
+    thirteen = raster_validator.extract_from_bytes(_geotiff(count=13), S2_NAME)
+    assert band_validator.detect_named_bands(thirteen, identify_sensor(filename=S2_NAME)) == {}
+    five = raster_validator.extract_from_bytes(_geotiff(count=5), "scene.tif")
+    assert band_validator.detect_named_bands(five, identify_sensor(sensor="Sentinel-2")) == {}
+
+
+def test_8_band_ids_are_not_interpreted_for_an_unknown_sensor():
     facts = _facts(["B4", "B8"])
     assert band_validator.detect_named_bands(facts, identify_sensor(filename="scene.tif")) == {}
-    assert band_validator.unrecognised_band_names(facts) == ["B4", "B8"]
+    assert band_validator.unrecognised_band_names(facts, None) == ["B4", "B8"]
 
 
-def test_band_ids_are_not_interpreted_for_an_unsupported_sensor():
-    landsat = identify_sensor(sensor="Landsat 8")  # Landsat 8 B8 is panchromatic, not NIR
-    assert band_validator.detect_named_bands(_facts(["B4", "B8"]), landsat) == {}
+def test_9_s1_and_risat_get_no_band_validation_and_are_sar():
+    for sensor in ("Sentinel-1A", "RISAT-1A"):
+        facts = raster_validator.extract_from_bytes(_geotiff(count=2), "scene.tif")  # unnamed bands
+        sid = identify_sensor(sensor=sensor)
+        assert modality_validator.infer_modality(facts, extension=".tif", sensor_id=sid, hint=None).modality == "sar"
+    # No SAR workflow validates bands any more.
+    from app.validation.workflow_validator import WORKFLOW_REGISTRY
+    assert not any(key.startswith("sar_") for key in WORKFLOW_REGISTRY)
 
 
-def test_self_describing_names_work_for_any_sensor():
-    assert band_validator.detect_named_bands(_facts(["Red", "NIR", "VV"])) == {"red": 1, "nir": 2, "vv": 3}
+def test_10_cartosat_mx_bands_from_config_and_ndvi_allowed():
+    image = _img("scene.tif", _geotiff(count=4, descriptions=["B1", "B2", "B3", "B4"]), sensor="Cartosat-3 MX")
+    facts = raster_validator.extract_from_bytes(image.content, image.filename)
+    assert band_validator.detect_named_bands(facts, identify_sensor(sensor="Cartosat-3 MX")) == {
+        "blue": 1, "green": 2, "red": 3, "nir": 4,
+    }
+    assert validate_images(workflow="ndvi", images=[image]).valid
 
 
-def test_risat_compact_pol_labels_are_reported_not_guessed():
-    risat = identify_sensor(sensor="RISAT-1A")
-    facts = _facts(["RH", "RV"])
-    assert band_validator.detect_named_bands(facts, risat) == {}
-    assert band_validator.unrecognised_band_names(facts, risat) == ["RH", "RV"]
+def test_cartosat_product_inferred_from_band_count():
+    from app.validation import cartosat_bands
+    sid = identify_sensor(sensor="Cartosat-3")  # no product stated
+    facts = raster_validator.extract_from_bytes(_geotiff(count=4), "scene.tif")
+    assert cartosat_bands.product_of(sid, facts) == ("MX", "band_count")
 
 
-def test_cartosat_band_numbers_are_never_assumed():
-    cartosat = identify_sensor(sensor="Cartosat-3 MX")
-    assert cartosat.product == "Cartosat MX"
-    assert band_validator.detect_named_bands(_facts(["B1", "B2", "B3", "B4"]), cartosat) == {}
+def test_11_cartosat_pan_fails_ndvi():
+    image = _img("scene.tif", _geotiff(count=1), sensor="Cartosat-3 PAN")
+    result = validate_images(workflow="ndvi", images=[image])
+    assert result.valid is False
+    assert BAND_MISSING in {e.code for e in result.errors}
 
 
-def test_filename_never_decides_band_identity():
-    # The filename names the sensor; the bands are still only what the raster says.
-    bands = band_validator.detect_named_bands(_facts([None, None]), identify_sensor(filename=S2_NAME))
-    assert bands == {}
+def test_12_cartosat_unrecognised_layout_gets_no_interpretation():
+    image = _img("scene.tif", _geotiff(count=3), sensor="Cartosat-3")
+    facts = raster_validator.extract_from_bytes(image.content, image.filename)
+    assert band_validator.detect_named_bands(facts, identify_sensor(sensor="Cartosat-3")) == {}
+    messages = [e.message for e in validate_images(workflow="ndvi", images=[image]).errors if e.code == BAND_MISSING]
+    assert messages and all("Cartosat product/band layout not recognised" in m for m in messages)
 
 
-# ---- modality ----------------------------------------------------------------------------
+def test_ndvi_accepts_b8a_as_nir_and_lists_what_is_missing():
+    assert validate_images(workflow="ndvi", images=[_img("scene.tif", _geotiff(descriptions=["B04", "B8A"]), sensor="Sentinel-2")]).valid
+    result = validate_images(workflow="ndvi", images=[_img("scene.tif", _geotiff(descriptions=["B02", "B03", "B04"]), sensor="Sentinel-2")])
+    assert [e.code for e in result.errors] == [BAND_MISSING]
+    assert "NIR band is required" in result.errors[0].message
+
+
+def test_unknown_sensor_fails_ndvi_but_passes_vqa():
+    image = lambda: _img("scene.tif", _geotiff(descriptions=["red", "nir"]))
+    assert UNKNOWN_SENSOR in {e.code for e in validate_images(workflow="ndvi", images=[image()]).errors}
+    assert validate_images(workflow="visual_vqa", images=[image()]).valid
+
+
+# ==== 4. Modality (cases 13-15) ===============================================================
 
 
 def _decide(facts, *, extension=".tif", filename=None, sensor=None, hint=None):
@@ -192,397 +307,191 @@ def _decide(facts, *, extension=".tif", filename=None, sensor=None, hint=None):
     return modality_validator.infer_modality(facts, extension=extension, sensor_id=sid, hint=hint)
 
 
-def test_unknown_four_band_raster_is_unknown_not_multispectral():
-    facts = raster_validator.extract_from_bytes(_geotiff(count=4), "scene.tif")
-    assert _decide(facts).modality == "unknown"
+def test_13_unknown_four_band_raster_is_unknown():
+    assert _decide(raster_validator.extract_from_bytes(_geotiff(count=4), "scene.tif")).modality == "unknown"
 
 
-def test_sensor_evidence_decides_modality():
-    one_band = raster_validator.extract_from_bytes(_geotiff(count=1), "scene.tif")
-    assert _decide(one_band, sensor="Sentinel-1").modality == "sar"
-    assert _decide(one_band, sensor="RISAT-1A").modality == "sar"
-    assert _decide(one_band, sensor="Cartosat-3 PAN").modality == "optical"
-    four_band = raster_validator.extract_from_bytes(_geotiff(count=4), "scene.tif")
-    assert _decide(four_band, sensor="Sentinel-2").modality == "multispectral"
-
-
-def test_a_filename_alone_never_decides_modality():
-    jpeg = raster_validator.extract_from_bytes(_image_bytes("JPEG"), "x.jpg")
-    decision = _decide(jpeg, extension=".jpg", filename="S1A_IW_GRDH_1SDV_quicklook.jpg")
-    assert decision.modality == "rgb"  # not "sar" just because of its name
-    undescribed = raster_validator.extract_from_bytes(_geotiff(count=4), S2_NAME)
-    assert _decide(undescribed, filename=S2_NAME).modality == "unknown"
-
-
-def test_hint_without_evidence_is_accepted_and_recorded():
-    facts = raster_validator.extract_from_bytes(_geotiff(count=2), "scene.tif")
-    decision = _decide(facts, hint="sar")
-    assert decision.modality == "sar" and decision.source == "hint" and not decision.hint_conflict
-
-
-def test_hint_contradicting_evidence_is_a_modality_mismatch():
-    facts = raster_validator.extract_from_bytes(_geotiff(descriptions=["VV"]), S1_NAME)
-    decision = _decide(facts, filename=S1_NAME, hint="optical")
-    assert decision.hint_conflict and decision.modality == "sar"
-    issue = modality_validator.hint_conflict_issue(decision, input_label="x")
-    assert issue.code == MODALITY_MISMATCH
-    assert "'optical'" in issue.message and "'sar'" in issue.message
-
-
-def test_multispectral_hint_on_plain_rgb_is_a_conflict():
-    facts = raster_validator.extract_from_bytes(_image_bytes("PNG"), "x.png")
-    assert _decide(facts, extension=".png", hint="multispectral").hint_conflict
-
-
-def test_generic_pipeline_reports_the_hint_conflict():
-    image = _img(S1_NAME, _geotiff(descriptions=["VV"]), hint="optical")
-    result = validate_images(workflow="visual_vqa", images=[image])
-    assert result.valid is False
+def test_14_s1_with_optical_hint_is_modality_mismatch():
+    facts = raster_validator.extract_from_bytes(_geotiff(descriptions=["VV"]), "scene.tif")
+    decision = _decide(facts, sensor="Sentinel-1A", hint="optical")
+    assert decision.hint_conflict
+    assert modality_validator.hint_conflict_issue(decision, input_label="x").code == MODALITY_MISMATCH
+    result = validate_images(workflow="visual_vqa", images=[_img("scene.tif", _geotiff(descriptions=["VV"]), sensor="Sentinel-1A", hint="optical")])
     assert [e.code for e in result.errors] == [MODALITY_MISMATCH]
 
 
-# ---- NDVI -----------------------------------------------------------------------------------
+def test_hint_without_evidence_is_accepted():
+    decision = _decide(raster_validator.extract_from_bytes(_geotiff(count=2), "scene.tif"), hint="sar")
+    assert (decision.modality, decision.source) == ("sar", "hint")
 
 
-def test_ndvi_valid_for_sentinel2_red_nir():
-    image = _img(S2_NAME, _geotiff(descriptions=["B02", "B03", "B04", "B08"]))
-    result = validate_images(workflow="ndvi", images=[image])
-    assert result.valid, result.errors
-    assert result.inputs[0].sensor == "sentinel-2" and result.inputs[0].sensor_source == "filename"
-
-
-def test_ndvi_accepts_b8a_as_nir():
-    image = _img(S2_NAME, _geotiff(descriptions=["B04", "B8A"]))
-    assert validate_images(workflow="ndvi", images=[image]).valid
-
-
-def test_ndvi_missing_nir_band_is_rejected():
-    image = _img(S2_NAME, _geotiff(descriptions=["B02", "B03", "B04"]))
-    result = validate_images(workflow="ndvi", images=[image])
-    assert result.valid is False
-    missing = [e for e in result.errors if e.code == BAND_MISSING]
-    assert missing and "NIR band is required" in missing[0].message
-
-
-def test_rgb_jpeg_cannot_satisfy_ndvi():
+def test_15_rgb_jpeg_fails_ndvi():
     result = validate_images(workflow="ndvi", images=[_img("photo.jpg", _image_bytes("JPEG"))])
-    codes = {e.code for e in result.errors}
     assert result.valid is False
-    assert {BAND_MISSING, MODALITY_MISMATCH} <= codes  # "rgb" isn't an NDVI modality, and there's no NIR
-    assert any("NIR band is required" in e.message for e in result.errors)
+    assert {BAND_MISSING, MODALITY_MISMATCH} <= {e.code for e in result.errors}
 
 
-def test_rgb_geotiff_of_a_known_sensor_still_needs_nir_for_ndvi():
-    image = _img("scene.tif", _geotiff(descriptions=["red", "green", "blue"]), sensor="Sentinel-2A")
-    result = validate_images(workflow="ndvi", images=[image])
-    assert [e.code for e in result.errors] == [BAND_MISSING]
+def test_cartosat_modality_by_product():
+    assert _decide(raster_validator.extract_from_bytes(_geotiff(count=4), "s.tif"), sensor="Cartosat-3 MX").modality == "multispectral"
+    assert _decide(raster_validator.extract_from_bytes(_geotiff(count=1), "s.tif"), sensor="Cartosat-3 PAN").modality == "optical"
 
 
-def test_cartosat_without_product_band_metadata_fails_ndvi_clearly():
-    image = _img("scene.tif", _geotiff(descriptions=["B1", "B2", "B3", "B4"]), sensor="Cartosat-3 MX")
-    result = validate_images(workflow="ndvi", images=[image])
-    messages = [e.message for e in result.errors if e.code == BAND_MISSING]
-    assert messages and all("Cartosat product band metadata not available" in m for m in messages)
+# ==== 5. Change detection (cases 16-23) ========================================================
 
 
-def test_unknown_sensor_fails_ndvi_but_the_same_image_passes_vqa():
-    image = lambda: _img("scene.tif", _geotiff(descriptions=["red", "nir"]))
-    ndvi = validate_images(workflow="ndvi", images=[image()])
-    assert UNKNOWN_SENSOR in {e.code for e in ndvi.errors}
-    assert validate_images(workflow="visual_vqa", images=[image()]).valid
+def test_16_same_imagery_id_is_identical():
+    content = _geotiff()
+    result = _cd(_meta("T1", content, "a.tif", imagery_id="same"), _meta("T2", content, "a.tif", imagery_id="same"))
+    assert result.errors[0].code == NOT_DISTINCT_OBSERVATIONS
+    assert "same id" in result.errors[0].message
+    assert result.checks["distinct_images"] is False
 
 
-def test_unsupported_sensor_fails_ndvi():
-    image = _img("LC08_L2SP_144051_20240101_20240110_02_T1.tif", _geotiff(descriptions=["red", "nir"]))
-    result = validate_images(workflow="ndvi", images=[image])
-    assert UNSUPPORTED_SENSOR in {e.code for e in result.errors}
+def test_same_storage_object_is_identical():
+    result = _cd(_meta("T1", _geotiff(), "a.tif", imagery_id="a", storage_path="imagery/x/a.tif"),
+                 _meta("T2", _geotiff(), "a.tif", imagery_id="b", storage_path="imagery/x/a.tif"))
+    assert "same file" in result.errors[0].message
 
 
-# ---- change detection: valid pairs -----------------------------------------------------------
+def test_17_same_bytes_under_different_ids_is_identical():
+    content = _geotiff()
+    result = _cd(_meta("T1", content, "a.tif", imagery_id="a"), _meta("T2", content, "b.tif", imagery_id="b"))
+    assert result.errors[0].code == NOT_DISTINCT_OBSERVATIONS
+    assert "identical content" in result.errors[0].message
 
 
-def test_compatible_sentinel2_pair_is_valid_under_strict():
-    bands = ["B02", "B03", "B04", "B08"]
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=bands), S2_NAME), _meta("T2", _geotiff(descriptions=bands), S2_NAME),
-        STRICT_REQUIREMENTS,
-    )
+def test_18_same_pixels_different_tiff_metadata_is_identical():
+    result = _cd(_meta("T1", _geotiff(fill=9), "a.tif", imagery_id="a"),
+                 _meta("T2", _geotiff(fill=9, tags={"NOTE": "re-exported"}, compress="deflate"), "b.tif", imagery_id="b"))
+    assert result.errors[0].code == NOT_DISTINCT_OBSERVATIONS
+    assert "identical pixels" in result.errors[0].message
+
+
+def test_19_two_different_s2_images_are_distinct():
+    result = _cd(_meta("T1", _geotiff(descriptions=S2_BANDS), S2_NAME, imagery_id="a"),
+                 _meta("T2", _geotiff(descriptions=S2_BANDS), S2_NAME, imagery_id="b"), STRICT_REQUIREMENTS)
     assert result.valid, result.errors
-    assert result.confidence == "exact"
+    assert result.check_details["distinct_images"].status == "pass"
     assert result.ordered_bands == {"t1": ["blue", "green", "red", "nir"], "t2": ["blue", "green", "red", "nir"]}
-    assert result.check_details["sensor"].status == "pass"
 
 
-def test_compatible_optical_cartosat_pair_is_valid_under_strict():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1), "a.tif", sensor="Cartosat-3 PAN"),
-        _meta("T2", _geotiff(count=1), "b.tif", sensor="Cartosat-3 PAN"),
-        STRICT_REQUIREMENTS,
-    )
-    assert result.valid, result.errors
+def test_stored_digests_are_used_without_reading_the_file():
+    def boom():
+        raise AssertionError("the original must not be read when digests are stored")
+    t1 = _meta("T1", _geotiff(), "a.tif", imagery_id="a", with_bytes=False, sha256="x" * 64, pixel_sha256="p", content_loader=boom)
+    t2 = _meta("T2", _geotiff(), "b.tif", imagery_id="b", with_bytes=False, sha256="x" * 64, pixel_sha256="q", content_loader=boom)
+    assert "identical content" in _cd(t1, t2).errors[0].message
 
 
-def test_sentinel1_vv_pair_is_valid():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV"]), S1_NAME), _meta("T2", _geotiff(descriptions=["VV"]), S1_NAME),
-        STRICT_REQUIREMENTS,
-    )
-    assert result.valid, result.errors
-    assert result.ordered_bands == {"t1": ["vv"], "t2": ["vv"]}
+def test_missing_digests_are_computed_once_from_the_stored_file():
+    content = _geotiff(fill=3)
+    calls = []
+    loader = lambda: calls.append(1) or content
+    t1 = _meta("T1", content, "a.tif", imagery_id="a", with_bytes=False, content_loader=loader)
+    t2 = _meta("T2", _geotiff(fill=3, compress="deflate"), "b.tif", imagery_id="b")
+    assert "identical pixels" in _cd(t1, t2).errors[0].message
+    assert calls == [1]
 
 
-def test_dual_pol_sentinel1_and_risat_pair_is_valid_with_ordered_bands():
-    # Stored VH-then-VV on T2: the ordered list is still [vv, vh] -- never set/dict order.
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV", "VH"]), S1_NAME),
-        _meta("T2", _geotiff(descriptions=["VH", "VV"]), "scene.tif", sensor="RISAT-1A"),
-        STRICT_REQUIREMENTS,
-    )
-    assert result.valid, result.errors
-    assert result.ordered_bands == {"t1": ["vv", "vh"], "t2": ["vv", "vh"]}
-
-
-def test_jpeg_pair_is_valid_under_the_relaxed_chat_profile():
-    result = validate_change_detection_inputs(
-        _meta("T1", _image_bytes("JPEG"), "before.jpg"), _meta("T2", _image_bytes("JPEG"), "after.jpg"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.valid, result.errors
-    for name in ("geospatial_t1", "geospatial_t2", "crs", "sensor"):
-        assert result.check_details[name].status == "skipped"
-        assert name not in result.checks  # skipped checks are never reported as passed
-
-
-def test_unknown_structurally_compatible_pair_is_valid_under_chat():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=2), "a.tif"), _meta("T2", _geotiff(count=2), "b.tif"), CHAT_GATE_REQUIREMENTS
-    )
-    assert result.valid, result.errors
-    assert result.confidence == "structural"
-    assert result.check_details["modality"].status == "skipped"
-
-
-# ---- change detection: invalid pairs ---------------------------------------------------------
-
-
-def test_optical_vs_sar_pair_is_rejected():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["B02", "B03", "B04", "B08"]), S2_NAME),
-        _meta("T2", _geotiff(descriptions=["VV", "VH", "VV", "VH"]), S1_NAME),
-        CHAT_GATE_REQUIREMENTS,
-    )
+def test_20_bitemporal_change_optical_vs_sar_is_modality_mismatch():
+    result = validate_images(workflow="bitemporal_change", images=[
+        _img(S2_NAME, _geotiff(descriptions=S2_BANDS), role="t1", imagery_id="t1"),
+        _img("s.tif", _geotiff(count=4), role="t2", imagery_id="t2", sensor="Sentinel-1A"),
+    ])
     assert result.valid is False
-    assert result.errors[0].code == IMAGE_TYPE_MISMATCH
-    assert (result.errors[0].t1, result.errors[0].t2) == ("Multispectral", "SAR")
-    assert result.checks["modality"] is False
-
-
-def test_missing_required_bands_in_t2_is_rejected():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["B02", "B03", "B04", "B08"]), S2_NAME),
-        _meta("T2", _geotiff(descriptions=["B02", "B03", "B04", "B05"]), S2_NAME),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.errors[0].code == BAND_MISMATCH
-    assert result.check_details["band_compatibility"].status == "fail"
-
-
-def test_vv_vh_difference_without_configuration_stays_band_mismatch():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV"]), "a.tif"), _meta("T2", _geotiff(descriptions=["VH"]), "b.tif"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.errors[0].code == BAND_MISMATCH
-
-
-def test_dual_pol_vs_single_pol_is_rejected_under_match_all():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV", "VH"]), "a.tif"), _meta("T2", _geotiff(descriptions=["VV", "HH"]), "b.tif"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.valid is False
-    assert result.errors[0].code == BAND_MISMATCH
-
-
-def test_expected_polarisations_reject_a_pair_that_lacks_them():
-    required = CHAT_GATE_REQUIREMENTS.with_overrides(expected_sar_polarizations=("vv", "vh"))
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV"]), "a.tif"), _meta("T2", _geotiff(descriptions=["VV"]), "b.tif"), required
-    )
-    assert result.errors[0].code == POLARIZATION_MISMATCH
-    assert "VV+VH" in result.errors[0].message
-
-
-def test_expected_polarisations_name_the_failing_image():
-    required = CHAT_GATE_REQUIREMENTS.with_overrides(expected_sar_polarizations=("vv",))
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV"]), "a.tif"), _meta("T2", _geotiff(descriptions=["VH"]), "b.tif"), required
-    )
-    assert result.errors[0].code == POLARIZATION_MISMATCH
-    assert result.errors[0].t1 is None and result.errors[0].t2 == "VH"
-
-
-def test_expected_polarisations_default_none_enforces_nothing_extra():
-    assert CHAT_GATE_REQUIREMENTS.expected_sar_polarizations is None
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV", "VH"]), "a.tif"), _meta("T2", _geotiff(descriptions=["VV", "VH"]), "b.tif"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.valid, result.errors
-
-
-def test_single_required_policy_rejects_a_multi_pol_image():
-    required = CHAT_GATE_REQUIREMENTS.with_overrides(sar_polarization_policy="single_required")
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV", "VH"]), "a.tif"), _meta("T2", _geotiff(descriptions=["VV", "VH"]), "b.tif"),
-        required,
-    )
-    assert result.errors[0].code == POLARIZATION_MISMATCH
-    assert "VV+VH" in result.errors[0].message
-
-
-def test_dimension_mismatch_is_rejected_and_recorded():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1, width=64, height=48), "a.tif"),
-        _meta("T2", _geotiff(count=1, width=128, height=96), "b.tif"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.errors[0].code == IMAGE_DIMENSION_MISMATCH
-    assert result.checks["dimensions"] is False
-    assert result.check_details["band_count"].detail == "not reached"
-    assert "band_count" not in result.checks
-
-
-def test_dtype_mismatch_is_rejected():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1, dtype="uint16"), "a.tif"),
-        _meta("T2", _geotiff(count=1, dtype="float32"), "b.tif"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.errors[0].code == DTYPE_MISMATCH
-    assert (result.errors[0].t1, result.errors[0].t2) == ("uint16", "float32")
-
-
-def test_dtype_check_can_be_disabled_and_then_is_skipped():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1, dtype="uint16"), "a.tif"),
-        _meta("T2", _geotiff(count=1, dtype="float32"), "b.tif"),
-        CHAT_GATE_REQUIREMENTS.with_overrides(require_matching_dtype=False),
-    )
-    assert result.valid, result.errors
-    assert result.check_details["dtype"].status == "skipped" and "dtype" not in result.checks
-
-
-def test_matching_dtype_passes():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1, dtype="float32"), "a.tif"), _meta("T2", _geotiff(count=1, dtype="float32"), "b.tif"),
-        CHAT_GATE_REQUIREMENTS,
-    )
-    assert result.valid and result.checks["dtype"] is True
-
-
-def test_unsupported_sensor_pair_is_rejected():
-    landsat = "LC08_L2SP_144051_20240101_20240110_02_T1.tif"
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1), landsat), _meta("T2", _geotiff(count=1), landsat), CHAT_GATE_REQUIREMENTS
-    )
-    assert result.errors[0].code == UNSUPPORTED_SENSOR
-
-
-def test_unknown_sensor_is_rejected_under_strict_validation():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1), "a.tif"), _meta("T2", _geotiff(count=1), "b.tif"), STRICT_REQUIREMENTS
-    )
-    assert result.errors[0].code == UNKNOWN_SENSOR
-    assert result.checks["sensor"] is False
-
-
-def test_hint_conflict_in_a_pair_is_modality_mismatch():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(descriptions=["VV"]), S1_NAME, hint="optical"),
-        _meta("T2", _geotiff(descriptions=["VV"]), S1_NAME),
-        CHAT_GATE_REQUIREMENTS,
-    )
     assert result.errors[0].code == MODALITY_MISMATCH
 
 
-# ---- geospatial: each image on its own -----------------------------------------------------------
-
-_NO_FORMAT_CHECK = STRICT_REQUIREMENTS.with_overrides(require_matching_format=False, require_known_sensor=False)
-
-
-def test_strict_geospatial_fails_on_t2_when_t2_is_png():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=3), "a.tif"),
-        _meta("T2", _image_bytes("PNG"), "b.png"),
-        _NO_FORMAT_CHECK,
-    )
-    assert result.errors[0].code == GEOREFERENCE_MISSING
-    assert result.errors[0].t2 == "T2" and result.errors[0].t1 is None
-    assert result.checks["geospatial_t1"] is True and result.checks["geospatial_t2"] is False
+def test_21_s1_and_risat_same_band_count_pass_without_band_validation():
+    result = _cd(_meta("T1", _geotiff(descriptions=["VV", "VH"]), "a.tif", sensor="Sentinel-1A"),
+                 _meta("T2", _geotiff(descriptions=["HH", "HV"]), "b.tif", sensor="RISAT-1A"), STRICT_REQUIREMENTS)
+    assert result.valid, result.errors
+    assert result.check_details["band_identity"].status == "skipped"
+    assert result.ordered_bands == {"t1": ["vv", "vh"], "t2": ["hh", "hv"]}  # file order, as-is
 
 
-def test_strict_geospatial_fails_on_t1_when_t1_is_png():
-    # Previously skipped entirely: the check only ran when T1 was a TIFF.
-    result = validate_change_detection_inputs(
-        _meta("T1", _image_bytes("PNG"), "a.png"),
-        _meta("T2", _geotiff(count=3), "b.tif"),
-        _NO_FORMAT_CHECK,
-    )
+def test_sar_pair_with_different_band_counts_is_rejected():
+    result = _cd(_meta("T1", _geotiff(count=2), "a.tif", sensor="Sentinel-1A"),
+                 _meta("T2", _geotiff(count=1), "b.tif", sensor="RISAT-1A"))
+    assert result.errors[0].code == BAND_MISMATCH
+
+
+def test_22_png_t1_fails_geospatial_on_t1():
+    reqs = STRICT_REQUIREMENTS.with_overrides(require_matching_format=False, require_known_sensor=False)
+    result = _cd(_meta("T1", _image_bytes("PNG"), "a.png"), _meta("T2", _geotiff(count=3), "b.tif"), reqs)
     assert result.errors[0].code == GEOREFERENCE_MISSING
     assert result.errors[0].t1 == "T1" and result.errors[0].t2 is None
 
 
-def test_strict_geospatial_rejects_a_jpeg_pair():
-    result = validate_change_detection_inputs(
-        _meta("T1", _image_bytes("JPEG"), "a.jpg"), _meta("T2", _image_bytes("JPEG"), "b.jpg"),
-        STRICT_REQUIREMENTS.with_overrides(require_known_sensor=False),
-    )
-    assert {e.code for e in result.errors} == {GEOREFERENCE_MISSING}
+def test_png_t2_fails_geospatial_on_t2():
+    reqs = STRICT_REQUIREMENTS.with_overrides(require_matching_format=False, require_known_sensor=False)
+    result = _cd(_meta("T1", _geotiff(count=3), "a.tif"), _meta("T2", _image_bytes("PNG"), "b.png"), reqs)
+    assert result.errors[0].code == GEOREFERENCE_MISSING
+    assert result.errors[0].t2 == "T2" and result.errors[0].t1 is None
+
+
+def test_23_defaults_skip_the_deferred_gates():
+    result = _cd(_meta("T1", _geotiff(count=1, width=64, height=48), "a.tif"),
+                 _meta("T2", _geotiff(count=1, width=100, height=30), "b.tif"), ChangeDetectionRequirements())
+    assert result.valid, result.errors
+    for name in ("aspect_ratio", "dimensions"):
+        assert result.check_details[name].status == "skipped" and name not in result.checks
+
+
+def test_chat_profile_keeps_the_dimension_gate_on():
+    result = _cd(_meta("T1", _geotiff(count=1, width=64, height=48), "a.tif"),
+                 _meta("T2", _geotiff(count=1, width=128, height=96), "b.tif"))
+    assert result.errors[0].code == "IMAGE_DIMENSION_MISMATCH"
+
+
+def test_24_landsat_pair_is_unsupported():
+    result = _cd(_meta("T1", _geotiff(), LANDSAT_NAME), _meta("T2", _geotiff(), LANDSAT_NAME))
+    assert result.errors[0].code == UNSUPPORTED_SENSOR
+
+
+def test_unknown_sensor_rejected_only_under_strict():
+    t1, t2 = _meta("T1", _geotiff(), "a.tif"), _meta("T2", _geotiff(), "b.tif")
+    assert _cd(t1, t2).valid
+    assert _cd(_meta("T1", _geotiff(), "a.tif"), _meta("T2", _geotiff(), "b.tif"), STRICT_REQUIREMENTS).errors[0].code == UNKNOWN_SENSOR
+
+
+def test_file_checks_run_first_and_name_the_image():
+    result = _cd(_meta("T1", _geotiff(), "a.tif"), _meta("T2", _geotiff(dtype="float64"), "b.tif"))
+    assert result.errors[0].code == UNSUPPORTED_DTYPE
+    assert result.errors[0].t2 == "T2" and result.checks["file_t1"] is True and result.checks["file_t2"] is False
+
+
+def test_dtype_mismatch_between_t1_and_t2():
+    result = _cd(_meta("T1", _geotiff(dtype="uint16"), "a.tif"), _meta("T2", _geotiff(dtype="float32"), "b.tif"))
+    assert result.errors[0].code == DTYPE_MISMATCH
+
+
+def test_duplicate_s2_band_is_rejected():
+    result = _cd(_meta("T1", _geotiff(descriptions=["B02", "B04", "B04", "B08"]), "a.tif", sensor="Sentinel-2"),
+                 _meta("T2", _geotiff(descriptions=S2_BANDS), "b.tif", sensor="Sentinel-2"))
+    assert result.errors[0].code == BAND_MISMATCH and "more than once" in result.errors[0].message
+
+
+def test_same_sensor_and_acquisition_time_is_a_warning_not_an_error():
+    result = _cd(_meta("T1", _geotiff(descriptions=S2_BANDS), "a.tif", sensor="Sentinel-2", acquisition_date="2024-01-01T05:02:11Z"),
+                 _meta("T2", _geotiff(descriptions=S2_BANDS), "b.tif", sensor="Sentinel-2", acquisition_date="2024-01-01T05:02:11Z"))
+    assert result.valid, result.errors
+    assert [w.code for w in result.warnings] == [SAME_ACQUISITION_TIME]
 
 
 def test_chat_profile_checks_geospatial_when_one_image_is_georeferenced():
-    result = validate_change_detection_inputs(
-        _meta("T1", _geotiff(count=1), "a.tif"), _meta("T2", _plain_tiff(count=1), "b.tif"), CHAT_GATE_REQUIREMENTS
-    )
-    assert result.errors[0].code == CRS_MISSING
-    assert result.errors[0].t2 == "T2"
+    plain = _geotiff(crs=None)
+    result = _cd(_meta("T1", _geotiff(), "a.tif"), _meta("T2", plain, "b.tif"))
+    assert result.errors[0].code == CRS_MISSING and result.errors[0].t2 == "T2"
 
 
-# ---- bitemporal_change can't bypass the change-detection validator ------------------------------
-
-
-def test_bitemporal_change_optical_vs_sar_is_rejected():
-    result = validate_images(workflow="bitemporal_change", images=[
-        _img(S2_NAME, _geotiff(descriptions=["B02", "B03", "B04", "B08"]), role="t1", imagery_id="t1"),
-        _img(S1_NAME, _geotiff(descriptions=["VV", "VH", "VV", "VH"]), role="t2", imagery_id="t2"),
-    ])
-    assert result.valid is False
-    assert result.errors[0].code in (IMAGE_TYPE_MISMATCH, MODALITY_MISMATCH)
-
-
-def test_bitemporal_change_compatible_pair_is_valid():
-    result = validate_images(workflow="bitemporal_change", images=[
-        _img(S1_NAME, _geotiff(descriptions=["VV"]), role="t1", imagery_id="t1"),
-        _img(S1_NAME, _geotiff(descriptions=["VV"]), role="t2", imagery_id="t2"),
-    ])
+def test_jpeg_pair_passes_the_chat_profile():
+    result = _cd(_meta("T1", _image_bytes("JPEG"), "before.jpg"), _meta("T2", _image_bytes("JPEG"), "after.jpg"))
     assert result.valid, result.errors
+    assert result.check_details["geospatial_t1"].status == "skipped" and "geospatial_t1" not in result.checks
 
 
-# ---- error-code audit ---------------------------------------------------------------------------------
-
-
-def test_image_type_mismatch_is_only_used_for_cross_image_modality_conflicts():
-    import pathlib
-    import app.validation as package
-    users = [
-        path.name for path in pathlib.Path(package.__file__).parent.glob("*.py")
-        if "IMAGE_TYPE_MISMATCH" in path.read_text(encoding="utf-8") and path.name != "errors.py"
-    ]
-    assert users == ["change_detection_validator.py"]
-
-
-# ---- API: chat profile by default, strict on request -----------------------------------------------
+# ==== API ======================================================================================
 
 
 def _upload(client, filename, content, content_type, **form):
@@ -591,48 +500,58 @@ def _upload(client, filename, content, content_type, **form):
     return response.json()["data"]["id"]
 
 
-def test_endpoint_defaults_to_the_chat_profile_for_a_jpeg_pair(client, fake_supabase):
-    t1 = _upload(client, "before.jpg", _image_bytes("JPEG"), "image/jpeg")
-    t2 = _upload(client, "after.jpg", _image_bytes("JPEG"), "image/jpeg")
+def test_17_api_two_uploads_of_the_same_bytes_are_rejected(client, fake_supabase):
+    content = _geotiff()
+    t1, t2 = _upload(client, "a.tif", content, "image/tiff"), _upload(client, "b.tif", content, "image/tiff")
     body = client.post("/api/v1/validation/change-detection", json={"t1_imagery_id": t1, "t2_imagery_id": t2}).json()["data"]
-    assert body["valid"] is True, body["errors"]
-    assert body["check_details"]["geospatial_t1"]["status"] == "skipped"
-    assert all(isinstance(value, bool) for value in body["checks"].values())
-
-    strict = client.post("/api/v1/validation/change-detection", json={
-        "t1_imagery_id": t1, "t2_imagery_id": t2, "profile": "strict",
-    }).json()["data"]
-    assert strict["valid"] is False
-    assert strict["error_code"] == UNKNOWN_SENSOR
-
-
-def test_endpoint_reports_sensor_in_the_image_summary(client, fake_supabase):
-    t1 = _upload(client, "a.tif", _geotiff(descriptions=["VV"]), "image/tiff", sensor="Sentinel-1A")
-    t2 = _upload(client, "b.tif", _geotiff(descriptions=["VV"]), "image/tiff", sensor="Sentinel-1B")
-    body = client.post("/api/v1/validation/change-detection", json={
-        "t1_imagery_id": t1, "t2_imagery_id": t2, "profile": "strict",
-    }).json()["data"]
-    assert body["valid"] is True, body["errors"]
-    assert body["t1"]["sensor"] == "sentinel-1" and body["t1"]["sensor_source"] == "db_sensor"
-    assert body["ordered_bands"] == {"t1": ["vv"], "t2": ["vv"]}
-
-
-def test_endpoint_expected_polarisations_override(client, fake_supabase):
-    t1 = _upload(client, "a.tif", _geotiff(descriptions=["VV"]), "image/tiff")
-    t2 = _upload(client, "b.tif", _geotiff(descriptions=["VV"]), "image/tiff")
-    body = client.post("/api/v1/validation/change-detection", json={
-        "t1_imagery_id": t1, "t2_imagery_id": t2, "expected_sar_polarizations": ["vv", "vh"],
-    }).json()["data"]
-    assert body["error_code"] == POLARIZATION_MISMATCH
-
-
-def test_analysis_chat_gate_rejects_a_dtype_mismatch_and_queues_nothing(client, fake_supabase):
-    t1 = _upload(client, "a.tif", _geotiff(count=1, dtype="uint16"), "image/tiff")
-    t2 = _upload(client, "b.tif", _geotiff(count=1, dtype="float32"), "image/tiff")
+    assert body["error_code"] == NOT_DISTINCT_OBSERVATIONS
     before = len(fake_supabase.store.get("analysis_jobs", []))
     response = client.post("/api/v1/analysis", json={
         "imagery_id": t1, "comparison_imagery_id": t2, "analysis_type": "general_analysis", "query": "What changed?",
     })
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == DTYPE_MISMATCH
+    assert response.status_code == 422 and response.json()["error"]["code"] == NOT_DISTINCT_OBSERVATIONS
     assert len(fake_supabase.store.get("analysis_jobs", [])) == before
+
+
+def test_api_endpoint_reports_check_details_and_sensor(client, fake_supabase):
+    t1 = _upload(client, "a.tif", _geotiff(descriptions=["VV"]), "image/tiff", sensor="Sentinel-1A")
+    t2 = _upload(client, "b.tif", _geotiff(descriptions=["VV"]), "image/tiff", sensor="Sentinel-1B")
+    body = client.post("/api/v1/validation/change-detection", json={
+        "t1_imagery_id": t1, "t2_imagery_id": t2, "profile": "strict",
+        # removed options: accepted and ignored
+        "expected_sar_polarizations": ["vv", "vh"], "sar_polarization_policy": "single_required",
+    }).json()["data"]
+    assert body["valid"] is True, body["errors"]
+    assert body["t1"]["sensor"] == "sentinel-1"
+    assert all(isinstance(value, bool) for value in body["checks"].values())
+    assert body["check_details"]["distinct_images"]["status"] == "pass"
+
+
+def test_analysis_gate_rejects_a_dtype_mismatch(client, fake_supabase):
+    t1 = _upload(client, "a.tif", _geotiff(count=1, dtype="uint16"), "image/tiff")
+    t2 = _upload(client, "b.tif", _geotiff(count=1, dtype="float32"), "image/tiff")
+    response = client.post("/api/v1/analysis", json={
+        "imagery_id": t1, "comparison_imagery_id": t2, "analysis_type": "general_analysis", "query": "What changed?",
+    })
+    assert response.status_code == 422 and response.json()["error"]["code"] == DTYPE_MISMATCH
+
+
+# ==== 26. Code audit ==============================================================================
+
+_VALIDATION = pathlib.Path(raster_validator.__file__).parent
+
+
+def test_26_no_aoi_validation_left():
+    assert not (_VALIDATION / "aoi_validator.py").exists()
+    assert not any("AOI" in code for code in ALL_CODES)
+    for path in _VALIDATION.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "shapely" not in text and "intersection_issues" not in text, path.name
+
+
+def test_26_image_type_mismatch_is_no_longer_emitted():
+    import re
+    # Imported or passed as a code anywhere (docstrings may still mention it).
+    use = re.compile(r"^\s*IMAGE_TYPE_MISMATCH,\s*$|import .*\bIMAGE_TYPE_MISMATCH\b|\(\s*IMAGE_TYPE_MISMATCH\b", re.M)
+    users = [p.name for p in _VALIDATION.glob("*.py") if p.name != "errors.py" and use.search(p.read_text(encoding="utf-8"))]
+    assert users == []  # defined (deprecated) in errors.py, emitted nowhere

@@ -10,4 +10,3 @@ pytest
 langgraph>=1.0,<2
 rasterio>=1.4,<2
 Pillow>=10,<13
-shapely>=2,<3

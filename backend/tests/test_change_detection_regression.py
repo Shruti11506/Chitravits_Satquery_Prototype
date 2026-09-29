@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
+from tests.images import unique_color, unique_fill
 
 ANALYSIS_ENDPOINT = "/api/v1/analysis"
 S2_BAND_NAMES = ["b01", "blue", "green", "red", "b05", "b06", "b07", "nir", "b8a", "b09", "b10", "swir1", "swir2"]
@@ -21,7 +22,7 @@ S2_BAND_NAMES = ["b01", "blue", "green", "red", "b05", "b06", "b07", "nir", "b8a
 
 def _geotiff(*, descriptions, crs="EPSG:32643", width=64, height=48, count=None):
     count = count if count is not None else len(descriptions)
-    data = np.zeros((count, height, width), dtype="uint16")
+    data = np.full((count, height, width), unique_fill(), dtype="uint16")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=width, height=height, count=count, dtype="uint16", crs=crs, transform=from_origin(776000, 1440000, 10, 10)) as dst:
             dst.write(data)
@@ -31,7 +32,7 @@ def _geotiff(*, descriptions, crs="EPSG:32643", width=64, height=48, count=None)
 
 
 def _plain_tiff(*, width=64, height=48, count=1):
-    data = np.zeros((count, height, width), dtype="uint8")
+    data = np.full((count, height, width), unique_fill(), dtype="uint8")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=width, height=height, count=count, dtype="uint8") as dst:
             dst.write(data)
@@ -40,7 +41,7 @@ def _plain_tiff(*, width=64, height=48, count=1):
 
 def _jpeg(width=64, height=48):
     buf = io.BytesIO()
-    Image.new("RGB", (width, height), color=(10, 20, 30)).save(buf, format="JPEG")
+    Image.new("RGB", (width, height), color=unique_color()).save(buf, format="JPEG")
     return buf.getvalue()
 
 
@@ -87,7 +88,7 @@ def test_the_exact_reported_bug_is_now_rejected(client, fake_supabase):
     t1 = _upload(client, "images.jpeg", _jpeg(), "image/jpeg")
     t2 = _upload(client, "S2A_MSI2LA_20260101T000000_dummy.tif", _geotiff(descriptions=S2_BAND_NAMES), "image/tiff")
 
-    error = _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH", "IMAGE_TYPE_MISMATCH"})
+    error = _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH"})
 
     # The rich diagnostic payload the frontend renders (section 13/14).
     assert error["details"]["workflow"] == "change_detection"
@@ -109,9 +110,10 @@ def test_jpeg_plus_jpeg_is_valid(client, fake_supabase):
 
 
 def test_geotiff_plus_geotiff_is_valid(client, fake_supabase):
-    content = _geotiff(descriptions=["red", "green", "blue"])
-    t1 = _upload(client, "t1.tif", content, "image/tiff")
-    t2 = _upload(client, "t2.tif", content, "image/tiff")
+    # Two different acquisitions (distinct pixels) -- the same file uploaded
+    # twice is now rejected as the same image (see test_validation_sensors.py).
+    t1 = _upload(client, "t1.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
+    t2 = _upload(client, "t2.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
     _assert_valid(client, fake_supabase, t1, t2)
 
 
@@ -127,22 +129,24 @@ def test_sar_vh_plus_vh_is_valid(client, fake_supabase):
     _assert_valid(client, fake_supabase, t1, t2)
 
 
-def test_sar_vv_plus_vh_is_rejected(client, fake_supabase):
+def test_sar_vv_plus_vh_is_not_polarisation_checked(client, fake_supabase):
+    # Scope: Sentinel-1 / RISAT get no band/polarisation validation; same
+    # band count + SAR on both sides is enough to queue.
     t1 = _upload(client, "t1.tif", _geotiff(descriptions=["VV"]), "image/tiff")
     t2 = _upload(client, "t2.tif", _geotiff(descriptions=["VH"]), "image/tiff")
-    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"BAND_MISMATCH"})
+    _assert_valid(client, fake_supabase, t1, t2)
 
 
 def test_optical_plus_sar_is_rejected(client, fake_supabase):
     t1 = _upload(client, "opt.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
     t2 = _upload(client, "sar.tif", _geotiff(descriptions=["VV"]), "image/tiff")
-    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH", "IMAGE_TYPE_MISMATCH"})
+    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH"})
 
 
 def test_rgb_plus_multispectral_is_rejected(client, fake_supabase):
     t1 = _upload(client, "rgb.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
     t2 = _upload(client, "s2.tif", _geotiff(descriptions=S2_BAND_NAMES), "image/tiff")
-    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH", "IMAGE_TYPE_MISMATCH"})
+    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH"})
 
 
 def test_different_dimensions_is_rejected(client, fake_supabase):
@@ -172,7 +176,7 @@ def test_missing_crs_is_rejected(client, fake_supabase):
 def test_missing_crs_is_rejected_when_modality_is_otherwise_unambiguous(client, fake_supabase):
     """Isolates the CRS-missing rule from modality ambiguity: both sides
     carry named RGB bands (so modality agrees), only T1 lacks a CRS."""
-    data = np.zeros((3, 48, 64), dtype="uint16")
+    data = np.full((3, 48, 64), unique_fill(), dtype="uint16")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=64, height=48, count=3, dtype="uint16") as dst:
             dst.write(data)
@@ -190,7 +194,7 @@ def test_reproduce_screenshot_multispectral_geotiff_t1_and_rgb_jpeg_t2(client, f
     T1 = Sentinel-2 multispectral GeoTIFF
     T2 = RGB JPEG
     workflow = change_detection
-    Expected: result.valid is False, code is IMAGE_TYPE_MISMATCH, no jobs queued.
+    Expected: result.valid is False, code is MODALITY_MISMATCH (IMAGE_TYPE_MISMATCH is deprecated), no jobs queued.
     """
     before_jobs = len(fake_supabase.store.get("analysis_jobs", []))
     t1 = _upload(client, "S2A_MSI2LA_20260101T000000_dummy.tif", _geotiff(descriptions=S2_BAND_NAMES), "image/tiff")
@@ -205,15 +209,15 @@ def test_reproduce_screenshot_multispectral_geotiff_t1_and_rgb_jpeg_t2(client, f
     val_body = val_resp.json()["data"]
     assert val_body["valid"] is False
     assert val_body["status"] == "REJECT"
-    assert val_body["errors"][0]["code"] == "IMAGE_TYPE_MISMATCH"
+    assert val_body["errors"][0]["code"] == "MODALITY_MISMATCH"
 
     # 2. Test via analysis creation endpoint -- hard gate rejection
-    err = _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"IMAGE_TYPE_MISMATCH", "MODALITY_MISMATCH"})
-    assert err["code"] == "IMAGE_TYPE_MISMATCH"
+    err = _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH"})
+    assert err["code"] == "MODALITY_MISMATCH"
     assert err["details"]["valid"] is False
     assert err["details"]["status"] == "REJECTED"
     assert err["details"]["workflow"] == "change_detection"
-    assert err["details"]["error_code"] == "IMAGE_TYPE_MISMATCH"
+    assert err["details"]["error_code"] == "MODALITY_MISMATCH"
     assert err["details"]["t1"]["modality"] == "multispectral"
     assert err["details"]["t2"]["modality"] == "rgb"
 

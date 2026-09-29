@@ -10,50 +10,44 @@ Runs the checks in a STRICT order and STOPS at the first one that fails --
 unlike the generic `app.validation.service.validate_images`, which collects
 every applicable issue:
 
-    readable -> distinct -> supported format -> SENSOR -> MODALITY ->
-    format family -> aspect ratio -> exact dimensions -> band count ->
-    band identity / compatibility (SAR: polarisation sets) -> geospatial
-    (T1, T2, then CRS) -> dtype
+    file T1 / T2 -> distinct images -> sensor -> modality -> format family
+    -> aspect ratio -> exact dimensions -> band count -> bands (optical
+    only) -> geospatial (T1, T2, then CRS) -> dtype
 
-Modality is the earliest cross-image comparison, checked BEFORE the
-format-family check, so the reported bug (T1 = plain RGB JPEG, T2 =
-Sentinel-2 multispectral GeoTIFF) comes back as a modality error rather
-than FILE_FORMAT_MISMATCH pre-empting it. dtype runs last so a structural
-problem (e.g. a missing CRS) is reported before a data-type difference.
-
-Error codes: two KNOWN but different modalities is IMAGE_TYPE_MISMATCH (the
-code this module has always emitted; the frontend reads it). A
-`modality_hint` that contradicts an image's own metadata is
-MODALITY_MISMATCH. A T1/T2 polarisation difference stays BAND_MISMATCH;
-POLARIZATION_MISMATCH is reserved for an explicitly configured polarisation
-requirement (`expected_sar_polarizations`, `sar_polarization_policy=
-"single_required"`).
-
-Geospatial: each image is validated on its own (so a JPEG/PNG fails as
-"T1" or "T2" specifically, whichever it is), then CRSs are compared. It
-runs when `require_geospatial`, or -- with `geospatial_when_present`, the
-chat profile -- when either image actually carries a CRS.
+* **File** checks (file_validator.py) say which image failed.
+* **Distinct images**: the same stored id, the same Storage object, the same
+  file bytes (SHA-256) or the same decoded pixels (pixel SHA-256, only when
+  the shapes and dtypes match) are all NOT_DISTINCT_OBSERVATIONS. Only
+  EXACT matches are rejected -- a real pair over a stable area can look
+  almost identical. Digests stored at upload (`imagery.metadata`) are used
+  when present; otherwise the file is read once to compute them.
+* **Modality**: two known, incompatible modalities (optical/multispectral
+  vs SAR vs RGB) are MODALITY_MISMATCH. `IMAGE_TYPE_MISMATCH` is no longer
+  emitted (deprecated; the frontend still recognises it).
+* **Bands**: Sentinel-2 / Cartosat pairs must have the same identified
+  bands. Sentinel-1 / RISAT get NO band or polarisation validation (scope):
+  only the band count is compared, and the channels go to the model in the
+  file's own order (reported in `ordered_bands`).
+* **Geospatial**: each image on its own (a JPEG/PNG fails as T1 or T2
+  specifically), then the CRS. Runs when `require_geospatial`, or -- with
+  `geospatial_when_present`, the chat profile -- when either image has a CRS.
+* The **aspect-ratio / exact-dimension** gates are off by default
+  (`ChangeDetectionRequirements`); the chat profile turns them on.
 
 Every check is recorded in `check_details` as pass / fail / skipped;
 `checks` (bool) lists only the checks that actually ran.
-
-"T1 and T2 are expected to differ": nothing here ever compares pixel
-content. The only identity check is that T1 and T2 are not the exact same
-stored image (NOT_DISTINCT_OBSERVATIONS).
 """
 from __future__ import annotations
 
-from app.validation import band_validator, dimension_validator, modality_validator
+from app.validation import band_validator, dimension_validator, file_validator, modality_validator
 from app.validation.errors import (
     BAND_MISMATCH,
     DTYPE_MISMATCH,
-    FILE_CORRUPTED,
     FILE_FORMAT_MISMATCH,
-    IMAGE_TYPE_MISMATCH,
+    MODALITY_MISMATCH,
     NOT_DISTINCT_OBSERVATIONS,
-    POLARIZATION_MISMATCH,
+    SAME_ACQUISITION_TIME,
     UNKNOWN_SENSOR,
-    UNSUPPORTED_FORMAT,
     UNSUPPORTED_SENSOR,
 )
 from app.validation.geospatial_validator import crs_match_issue, geospatial_issues
@@ -71,15 +65,21 @@ _MODALITY_LABELS = {
     "optical": "Optical", "rgb": "RGB", "multispectral": "Multispectral",
     "sar": "SAR", "optical_sar": "Optical+SAR", "unknown": "Unknown",
 }
+# Known modalities that may still be paired with each other (besides equal ones).
+_COMPATIBLE_MODALITIES = (frozenset({"optical", "multispectral"}),)
 # Every check this validator can report, in the order it runs.
 CHECK_ORDER = (
-    "format", "sensor", "modality", "aspect_ratio", "dimensions", "band_count",
-    "band_identity", "band_compatibility", "geospatial_t1", "geospatial_t2", "crs", "dtype",
+    "file_t1", "file_t2", "distinct_images", "sensor", "modality", "format", "aspect_ratio", "dimensions",
+    "band_count", "band_identity", "band_compatibility", "geospatial_t1", "geospatial_t2", "crs", "dtype",
 )
 
 
 def _modality_label(modality: str) -> str:
     return _MODALITY_LABELS.get(modality, modality)
+
+
+def _compatible(modality_1: str, modality_2: str) -> bool:
+    return modality_1 == modality_2 or any({modality_1, modality_2} <= group for group in _COMPATIBLE_MODALITIES)
 
 
 def sensor_of(image: ChangeDetectionImageMetadata) -> SensorIdentification:
@@ -98,18 +98,16 @@ class _Run:
     def __init__(self) -> None:
         self.details: dict[str, CheckDetail] = {}
         self.ordered_bands: dict[str, list[str]] | None = None
+        self.warnings: list[ChangeDetectionIssue] = []
 
     def record(self, name: str, status: str, detail: str | None = None) -> None:
         self.details[name] = CheckDetail(status=status, detail=detail)
 
     def _result(self, **kwargs) -> ChangeDetectionValidationResult:
-        details = dict(self.details)
-        for name in CHECK_ORDER:
-            details.setdefault(name, CheckDetail(status="skipped", detail="not reached"))
-        details = {name: details[name] for name in CHECK_ORDER}
+        details = {name: self.details.get(name, CheckDetail(status="skipped", detail="not reached")) for name in CHECK_ORDER}
         checks = {name: d.status == "pass" for name, d in details.items() if d.status != "skipped"}
         return ChangeDetectionValidationResult(
-            checks=checks, check_details=details, ordered_bands=self.ordered_bands, **kwargs
+            checks=checks, check_details=details, ordered_bands=self.ordered_bands, warnings=self.warnings, **kwargs
         )
 
     def reject(self, *issues: ChangeDetectionIssue) -> ChangeDetectionValidationResult:
@@ -117,6 +115,53 @@ class _Run:
 
     def valid(self, confidence: str) -> ChangeDetectionValidationResult:
         return self._result(valid=True, status="VALID", confidence=confidence, errors=[])
+
+
+# ---- file content & digests (lazy: read at most once, only when needed) ------------
+
+
+def _content(image: ChangeDetectionImageMetadata) -> bytes | None:
+    if image.content is None and image.content_loader is not None:
+        loader, image.content_loader = image.content_loader, None
+        try:
+            image.content = loader()
+        except Exception:  # noqa: BLE001 - an unavailable file just can't be compared
+            image.content = None
+    return image.content
+
+
+def _sha256(image: ChangeDetectionImageMetadata) -> str | None:
+    if image.sha256 is None:
+        content = _content(image)
+        if content is not None:
+            image.sha256 = file_validator.sha256_of(content)
+    return image.sha256
+
+
+def _pixel_sha256(image: ChangeDetectionImageMetadata) -> str | None:
+    if image.pixel_sha256 is None:
+        content = _content(image)
+        if content is not None:
+            image.pixel_sha256 = file_validator.pixel_sha256(content, image.filename or f"image{image.extension}")
+    return image.pixel_sha256
+
+
+def _same_shape(t1: ChangeDetectionImageMetadata, t2: ChangeDetectionImageMetadata) -> bool:
+    f1, f2 = t1.facts, t2.facts
+    return (f1.width, f1.height, f1.band_count, list(f1.dtypes)) == (f2.width, f2.height, f2.band_count, list(f2.dtypes))
+
+
+def _file_issues(image: ChangeDetectionImageMetadata, key: str) -> list[ChangeDetectionIssue]:
+    """file_validator's checks for one side: byte-level ones when its bytes
+    are at hand, the structural ones (readable, dimensions, bands, dtype) always."""
+    if image.content is not None:
+        issues = file_validator.validate_file(
+            image.filename or f"image{image.extension}", image.content, image.content_type,
+            input_label=image.label, compute_digests=False,
+        ).issues
+    else:
+        issues = file_validator.facts_issues(image.facts, input_label=image.label)
+    return [ChangeDetectionIssue.of(issue.code, f"{image.label}: {issue.message}", **{key: image.label}) for issue in issues]
 
 
 def validate_change_detection_inputs(
@@ -128,32 +173,44 @@ def validate_change_detection_inputs(
     req = workflow_requirements
     run = _Run()
 
-    # 1. Both files readable?
-    unreadable = [
-        ChangeDetectionIssue.of(FILE_CORRUPTED, f"{image.label} could not be read: {image.facts.error}", **{key: image.label})
-        for image, key in ((t1, "t1"), (t2, "t2")) if image.facts.error
-    ]
-    if unreadable:
-        return run.reject(*unreadable)
+    # 1. File validation, T1 then T2 -- each error names its image.
+    for image, key in ((t1, "t1"), (t2, "t2")):
+        issues = _file_issues(image, key)
+        if issues:
+            run.record(f"file_{key}", "fail", issues[0].code)
+            return run.reject(*issues)
+        run.record(f"file_{key}", "pass", f"{image.facts.format}, {image.facts.width}x{image.facts.height}, "
+                                          f"{image.facts.band_count} band(s)")
 
-    # 2. Distinct images -- not literally the same stored image.
+    # 2. Distinct images: cheapest evidence first, exact matches only.
+    reason, compared = None, []
     if t1.imagery_id and t2.imagery_id and t1.imagery_id == t2.imagery_id:
+        reason = "same id"
+    elif t1.storage_path and t2.storage_path and t1.storage_path == t2.storage_path:
+        reason = "same file"
+    else:
+        sha_1, sha_2 = _sha256(t1), _sha256(t2)
+        if sha_1 and sha_2:
+            compared.append("content hashes")
+            if sha_1 == sha_2:
+                reason = "identical content"
+        if reason is None and _same_shape(t1, t2):
+            pixels_1, pixels_2 = _pixel_sha256(t1), _pixel_sha256(t2)
+            if pixels_1 and pixels_2:
+                compared.append("pixels")
+                if pixels_1 == pixels_2:
+                    reason = "identical pixels"
+    if reason:
+        run.record("distinct_images", "fail", reason)
         return run.reject(ChangeDetectionIssue.of(
             NOT_DISTINCT_OBSERVATIONS,
-            "T1 and T2 must be two different uploaded images; the same image was submitted for both.",
+            f"T1 and T2 are the same image ({reason}). Change detection needs two different acquisitions.",
             t1=t1.label, t2=t2.label,
         ))
+    run.record("distinct_images", "pass", f"different {' and '.join(compared)}" if compared
+               else "different images (content not available to compare)")
 
-    # 3. Supported format?
-    missing_format = [
-        ChangeDetectionIssue.of(UNSUPPORTED_FORMAT, f"{image.label}'s format could not be determined.", **{key: image.label})
-        for image, key in ((t1, "t1"), (t2, "t2")) if not image.facts.format
-    ]
-    if missing_format:
-        run.record("format", "fail", "format could not be determined")
-        return run.reject(*missing_format)
-
-    # 4. Sensor (sensors.py).
+    # 3. Sensor (sensors.py).
     sensor_1, sensor_2 = sensor_of(t1), sensor_of(t2)
     sensor_detail = (
         f"T1={sensor_1.label} ({sensor_1.source or 'no evidence'}), T2={sensor_2.label} ({sensor_2.source or 'no evidence'})"
@@ -183,8 +240,9 @@ def validate_change_detection_inputs(
         run.record("sensor", "pass", sensor_detail)
     else:
         run.record("sensor", "skipped", sensor_detail + "; a known sensor is not required by this profile")
+    _same_acquisition_warning(run, t1, t2, sensor_1, sensor_2)
 
-    # 5. Modality: each image's hint against its own evidence, then T1 vs T2.
+    # 4. Modality: each image's hint against its own evidence, then T1 vs T2.
     decision_1, decision_2 = modality_of(t1, sensor_1), modality_of(t2, sensor_2)
     for image, decision, key in ((t1, decision_1, "t1"), (t2, decision_2, "t2")):
         conflict = modality_validator.hint_conflict_issue(decision, input_label=image.label)
@@ -197,10 +255,10 @@ def validate_change_detection_inputs(
     modality_1, modality_2 = decision_1.modality, decision_2.modality
     modality_detail = f"{modality_1} ({decision_1.source}) / {modality_2} ({decision_2.source})"
     if modality_1 != "unknown" and modality_2 != "unknown":
-        if modality_1 != modality_2:
+        if not _compatible(modality_1, modality_2):
             run.record("modality", "fail", modality_detail)
             return run.reject(ChangeDetectionIssue.of(
-                IMAGE_TYPE_MISMATCH,
+                MODALITY_MISMATCH,
                 f"{t1.label} and {t2.label} have incompatible image types for change detection.",
                 t1=_modality_label(modality_1), t2=_modality_label(modality_2),
             ))
@@ -209,25 +267,26 @@ def validate_change_detection_inputs(
         # UNKNOWN is not automatically invalid -- structural checks continue.
         run.record("modality", "skipped", modality_detail + "; not determinable, structural checks continue")
 
-    # 6. Format family match between T1 and T2 (TIFF vs image).
+    # 5. Format family match between T1 and T2 (TIFF vs image).
+    format_detail = f"{t1.facts.format} / {t2.facts.format}"
     if req.require_matching_format:
         family_1 = "tiff" if t1.extension in TIFF_EXTENSIONS else "image"
         family_2 = "tiff" if t2.extension in TIFF_EXTENSIONS else "image"
         if family_1 != family_2:
-            run.record("format", "fail", f"{t1.facts.format} / {t2.facts.format}")
+            run.record("format", "fail", format_detail)
             return run.reject(ChangeDetectionIssue.of(
                 FILE_FORMAT_MISMATCH,
                 f"{t1.label} is {t1.facts.format} but {t2.label} is {t2.facts.format}. "
                 "This workflow requires both images to be the same raster format.",
                 t1=t1.facts.format, t2=t2.facts.format,
             ))
-        run.record("format", "pass", f"{t1.facts.format} / {t2.facts.format}")
+        run.record("format", "pass", format_detail)
     else:
-        run.record("format", "pass", f"{t1.facts.format} / {t2.facts.format}; matching format family not required")
+        run.record("format", "skipped", format_detail + "; matching format family not required")
 
-    # 7. Compatible aspect ratio?
+    # 6. Aspect ratio (deferred gate).
     if req.aspect_ratio_tolerance is None:
-        run.record("aspect_ratio", "skipped", "disabled")
+        run.record("aspect_ratio", "skipped", "deferred")
     else:
         ratio_issue = dimension_validator.aspect_ratio_issue(
             t1.facts, t2.facts, tolerance=req.aspect_ratio_tolerance, t1_label=t1.label, t2_label=t2.label
@@ -237,7 +296,7 @@ def validate_change_detection_inputs(
             return run.reject(ratio_issue)
         run.record("aspect_ratio", "pass", f"within tolerance {req.aspect_ratio_tolerance}")
 
-    # 8. Compatible (exact) dimensions?
+    # 7. Exact dimensions (deferred gate).
     size_detail = f"{t1.facts.width}x{t1.facts.height} / {t2.facts.width}x{t2.facts.height}"
     if req.require_exact_dimensions:
         dim_issue = dimension_validator.exact_dimension_issue(t1.facts, t2.facts, t1_label=t1.label, t2_label=t2.label)
@@ -246,9 +305,9 @@ def validate_change_detection_inputs(
             return run.reject(dim_issue)
         run.record("dimensions", "pass", size_detail)
     else:
-        run.record("dimensions", "skipped", f"{size_detail}; exact dimensions not required")
+        run.record("dimensions", "skipped", f"deferred ({size_detail})")
 
-    # 9. Band count compatibility.
+    # 8. Band count (the only band check SAR pairs get).
     count_1, count_2 = t1.facts.band_count, t2.facts.band_count
     if count_1 is not None and count_2 is not None:
         if count_1 != count_2:
@@ -263,19 +322,19 @@ def validate_change_detection_inputs(
     else:
         run.record("band_count", "skipped", "band count unavailable")
 
-    # 10. Band identity + compatibility. SAR: polarisation sets; else named bands.
+    # 9. Bands -- optical only; SAR gets no band/polarisation validation.
     bands_1 = band_validator.detect_named_bands(t1.facts, sensor_1)
     bands_2 = band_validator.detect_named_bands(t2.facts, sensor_2)
-    pols_1, pols_2 = band_validator.sar_polarizations(bands_1), band_validator.sar_polarizations(bands_2)
-    is_sar = modality_1 == "sar" or modality_2 == "sar" or bool(pols_1 or pols_2)
-    band_issue = (
-        _sar_band_issue(run, t1, t2, pols_1, pols_2, req) if is_sar
-        else _general_band_issue(run, t1, t2, bands_1, bands_2, sensor_1, sensor_2)
-    )
-    if band_issue:
-        return run.reject(band_issue)
+    if modality_1 == "sar" or modality_2 == "sar":
+        run.ordered_bands = {"t1": band_validator.ordered_bands(bands_1), "t2": band_validator.ordered_bands(bands_2)}
+        run.record("band_identity", "skipped", "no band validation for SAR (Sentinel-1 / RISAT)")
+        run.record("band_compatibility", "skipped", "no band validation for SAR; channels are passed in file order")
+    else:
+        band_issue = _optical_band_issue(run, t1, t2, bands_1, bands_2, sensor_1, sensor_2)
+        if band_issue:
+            return run.reject(band_issue)
 
-    # 11. Geospatial: each image on its own, then CRS equality.
+    # 10. Geospatial: each image on its own, then CRS equality.
     any_georeferenced = t1.facts.crs is not None or t2.facts.crs is not None
     if req.require_geospatial or (req.geospatial_when_present and any_georeferenced):
         geo_issues = []
@@ -302,7 +361,7 @@ def validate_change_detection_inputs(
         for name in ("geospatial_t1", "geospatial_t2", "crs"):
             run.record(name, "skipped", reason)
 
-    # 12. dtype -- T1/T2 compatibility only; no per-sensor allowlist (TODO(team)).
+    # 11. dtype -- T1/T2 must match; the supported set was checked in step 1.
     dtype_1, dtype_2 = _dtype_signature(t1), _dtype_signature(t2)
     if not req.require_matching_dtype:
         run.record("dtype", "skipped", "matching dtype not required")
@@ -319,9 +378,24 @@ def validate_change_detection_inputs(
     else:
         run.record("dtype", "pass", f"{dtype_1} / {dtype_2}")
 
-    # 13. VALID.
+    # 12. VALID.
     confidence = "exact" if (modality_1 != "unknown" and modality_2 != "unknown") else "structural"
     return run.valid(confidence)
+
+
+def _same_acquisition_warning(run, t1, t2, sensor_1, sensor_2) -> None:
+    """A warning, never an error: same sensor AND same acquisition datetime
+    usually means the same scene twice -- but only when both dates are known."""
+    if (
+        t1.acquisition_date and t2.acquisition_date and str(t1.acquisition_date) == str(t2.acquisition_date)
+        and sensor_1.is_supported and sensor_1.family == sensor_2.family
+    ):
+        run.warnings.append(ChangeDetectionIssue.of(
+            SAME_ACQUISITION_TIME,
+            f"T1 and T2 have the same sensor ({sensor_1.label}) and the same acquisition time; "
+            "check they really are two different acquisitions.",
+            t1=str(t1.acquisition_date), t2=str(t2.acquisition_date),
+        ))
 
 
 def _dtype_signature(image: ChangeDetectionImageMetadata) -> str | None:
@@ -329,7 +403,7 @@ def _dtype_signature(image: ChangeDetectionImageMetadata) -> str | None:
     return "+".join(dtypes) if dtypes else None
 
 
-def _general_band_issue(
+def _optical_band_issue(
     run: _Run,
     t1: ChangeDetectionImageMetadata,
     t2: ChangeDetectionImageMetadata,
@@ -338,13 +412,26 @@ def _general_band_issue(
     sensor_1: SensorIdentification,
     sensor_2: SensorIdentification,
 ) -> ChangeDetectionIssue | None:
-    """T1 and T2 must offer the same identified bands (e.g. both Red+NIR). If
-    neither has identified bands but BOTH carry band names, the raw names are
-    compared literally (no interpretation). Nothing named -> structural pass."""
+    """Sentinel-2 / Cartosat (and any self-describing names): T1 and T2 must
+    have the same identified band set. If neither has identified bands but
+    BOTH carry band names, the raw names are compared literally (no
+    interpretation). Nothing named -> structural pass."""
+    for image, sensor, key in ((t1, sensor_1, "t1"), (t2, sensor_2, "t2")):
+        duplicates = band_validator.duplicate_bands(image.facts, sensor)
+        if duplicates:
+            run.record("band_identity", "fail", f"{image.label} repeats {duplicates}")
+            return ChangeDetectionIssue.of(
+                BAND_MISMATCH, f"{image.label} contains the same band more than once ({', '.join(duplicates)}).",
+                **{key: "+".join(duplicates)},
+            )
+
     ordered_1, ordered_2 = band_validator.ordered_bands(bands_1), band_validator.ordered_bands(bands_2)
     if bands_1 or bands_2:
         run.ordered_bands = {"t1": ordered_1, "t2": ordered_2}
-        run.record("band_identity", "pass", f"T1 {ordered_1 or 'none identified'}; T2 {ordered_2 or 'none identified'}")
+        source_1 = band_validator.band_identification_source(t1.facts, sensor_1) or "none"
+        source_2 = band_validator.band_identification_source(t2.facts, sensor_2) or "none"
+        run.record("band_identity", "pass",
+                   f"T1 {ordered_1 or 'none identified'} ({source_1}); T2 {ordered_2 or 'none identified'} ({source_2})")
         if set(bands_1) != set(bands_2):
             run.record("band_compatibility", "fail", "identified band sets differ")
             return ChangeDetectionIssue.of(
@@ -369,67 +456,6 @@ def _general_band_issue(
         run.record("band_compatibility", "pass", "raw band names equal (not interpreted)")
     else:
         run.record("band_compatibility", "skipped", "no band names to compare")
-    return None
-
-
-def _sar_band_issue(
-    run: _Run,
-    t1: ChangeDetectionImageMetadata,
-    t2: ChangeDetectionImageMetadata,
-    pols_1: list[str],
-    pols_2: list[str],
-    req: ChangeDetectionRequirements,
-) -> ChangeDetectionIssue | None:
-    """SAR rule: compare polarisation SETS (VV <-> VV, VV+VH <-> VV+VH), never
-    one arbitrarily picked band. Unidentifiable polarisation is flagged."""
-    val_1 = "+".join(p.upper() for p in pols_1) or "unidentified"
-    val_2 = "+".join(p.upper() for p in pols_2) or "unidentified"
-    run.ordered_bands = {"t1": pols_1, "t2": pols_2}
-
-    # Identity: both images must have identifiable polarisations.
-    if not pols_1 or not pols_2:
-        run.record("band_identity", "fail", f"T1 {val_1}; T2 {val_2}")
-        return ChangeDetectionIssue.of(
-            BAND_MISMATCH,
-            f"SAR change detection requires the same polarization for {t1.label} and {t2.label} "
-            "(VV -> VV, VH -> VH) -- never a mix.",
-            t1=val_1, t2=val_2,
-        )
-    run.record("band_identity", "pass", f"T1 {pols_1}; T2 {pols_2}")
-
-    # Explicitly configured requirements first -- they're the more specific error.
-    if req.sar_polarization_policy == "single_required":
-        for image, pols, key in ((t1, pols_1, "t1"), (t2, pols_2, "t2")):
-            if len(pols) != 1:
-                run.record("band_compatibility", "fail", f"{image.label} has {len(pols)} polarisations (single_required)")
-                return ChangeDetectionIssue.of(
-                    POLARIZATION_MISMATCH,
-                    f"{image.label} carries several polarisations ({'+'.join(p.upper() for p in pols)}); this workflow "
-                    "needs exactly one per image. Choose which polarisation to use.",
-                    **{key: "+".join(p.upper() for p in pols)},
-                )
-    if req.expected_sar_polarizations is not None:
-        expected = [p for p in band_validator.SAR_POLARIZATIONS if p in {e.lower() for e in req.expected_sar_polarizations}]
-        for image, pols, key in ((t1, pols_1, "t1"), (t2, pols_2, "t2")):
-            if pols != expected:
-                expected_label = "+".join(p.upper() for p in expected)
-                run.record("band_compatibility", "fail", f"{image.label} {pols} != expected {expected}")
-                return ChangeDetectionIssue.of(
-                    POLARIZATION_MISMATCH,
-                    f"{image.label} provides {'+'.join(p.upper() for p in pols)}, but this workflow requires "
-                    f"{expected_label} polarisation.",
-                    **{key: "+".join(p.upper() for p in pols)},
-                )
-
-    if pols_1 != pols_2:  # both lists are in canonical order, so this is a set comparison
-        run.record("band_compatibility", "fail", f"polarisation sets differ ({req.sar_polarization_policy})")
-        return ChangeDetectionIssue.of(
-            BAND_MISMATCH,
-            f"SAR band mismatch: {t1.label} = {val_1}, {t2.label} = {val_2}. "
-            "SAR change detection requires identical polarization.",
-            t1=val_1, t2=val_2,
-        )
-    run.record("band_compatibility", "pass", f"polarisation sets equal ({req.sar_polarization_policy})")
     return None
 
 

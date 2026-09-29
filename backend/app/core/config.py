@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     VALIDATION_MAX_IMAGE_WIDTH: int = 20000
     VALIDATION_MAX_IMAGE_HEIGHT: int = 20000
     VALIDATION_MAX_BANDS: int = 50
+    # width x height ceiling checked by file validation (decompression-bomb guard).
+    VALIDATION_MAX_PIXELS: int = 400_000_000
     VALIDATION_MAX_INPUT_IMAGES: int = 2
 
     @property

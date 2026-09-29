@@ -6,13 +6,14 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 from app.services import raster_service
+from tests.images import real_png
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def _geotiff(*, count=3, dtype="uint16", crs="EPSG:32643", width=64, height=48, nodata=None, tags=None, descriptions=None):
+def _geotiff(*, count=3, dtype="uint16", crs="EPSG:32643", width=64, height=48, nodata=None, tags=None, descriptions=None, seed=0):
     """A small real GeoTIFF: UTM 43N, 10 m pixels, top-left at (776000, 1440000) -- near Bengaluru."""
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     data = rng.integers(100, 4000, size=(count, height, width)).astype(dtype)
     if nodata is not None:
         data[:, :4, :] = nodata
@@ -81,17 +82,11 @@ def test_cloud_cover_only_from_a_real_tag(client):
     assert data["cloud_cover"] == 12.5
 
 
-def test_corrupt_tiff_still_uploads_without_extras(client, fake_supabase):
+def test_corrupt_tiff_is_rejected_before_anything_is_stored(client, fake_supabase):
     response = _upload(client, "broken.tif", b"II*\x00 not really a tiff")
-    assert response.status_code == 201
-    data = response.json()["data"]
-    assert data["thumbnail_url"] is None
-    assert data["latitude"] is None and data["longitude"] is None and data["bbox"] is None
-    assert list(fake_supabase.storage.objects) == [f"Satquery/{data['storage_path']}"]
-
-    fetched = client.get(f"/api/v1/imagery/{data['id']}").json()["data"]
-    assert fetched["thumbnail_url"] is None
-    assert fetched["url"]
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "FILE_CORRUPTED"
+    assert fake_supabase.storage.objects == {}
 
 
 def test_tiff_without_crs_gets_thumbnail_but_no_coordinates(client):
@@ -124,7 +119,7 @@ def test_thumbnail_upload_failure_keeps_the_upload(client, fake_supabase, monkey
 def test_png_upload_is_unaffected(client, fake_supabase, monkeypatch):
     called = []
     monkeypatch.setattr(raster_service, "extract", lambda content: called.append(1))
-    response = _upload(client, "photo.png", b"\x89PNG fake", "image/png")
+    response = _upload(client, "photo.png", real_png(), "image/png")
     assert response.status_code == 201
     data = response.json()["data"]
     assert called == []

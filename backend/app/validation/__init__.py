@@ -18,15 +18,15 @@ independently testable check it composes -- see each module's own
 docstring):
 
     service.py               orchestrates the pipeline below
-    file_validator.py        format / size (section 2)
+    file_validator.py        every file check (upload + reuse) + SHA-256 / pixel digests (section 2)
     raster_validator.py      opens the file; width/height/bands/dtype/CRS (section 3)
     geospatial_validator.py  CRS/transform/bounds, only when required (section 4)
     sensors.py               which of Sentinel-1/-2, Cartosat, RISAT produced a file (or unsupported/unknown)
     modality_validator.py    optical/multispectral/SAR from bands + sensor evidence; validates modality_hint (section 5)
-    band_validator.py        sensor-aware band names + the VV<->VV / VH<->VH rule (section 6)
-    change_detection_validator.py  strict, order-stopping T1/T2 pair check (chat / strict profiles)
+    band_validator.py        Sentinel-2 band IDs (+ positional fallback); no S1/RISAT band validation (section 6)
+    cartosat_bands.py        Cartosat MX/PAN band config, addressed by raster index
+    change_detection_validator.py  order-stopping T1/T2 pair check incl. same-image detection (chat / strict profiles)
     workflow_validator.py    the declarative WORKFLOW_REGISTRY + count/role/pairing checks (sections 7, 9)
-    aoi_validator.py         AOI geometry validity + image-bounds intersection (section 10)
     limits.py                configurable resource ceilings (section 11)
     schemas.py               request/response/internal shapes
     errors.py                machine-readable error codes

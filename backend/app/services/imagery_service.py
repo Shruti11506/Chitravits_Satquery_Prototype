@@ -54,6 +54,7 @@ def create_imagery_from_upload(
     conversation_id: str | None = None,
     raster: raster_service.RasterInfo | None = None,
     preview: dict[str, Any] | None = None,
+    digests: dict[str, str] | None = None,
 ) -> dict:
     """Insert the imagery metadata row after a successful Storage upload.
 
@@ -75,6 +76,7 @@ def create_imagery_from_upload(
         metadata=metadata,
         conversation_id=conversation_id,
         raster=raster,
+        digests=digests,
     )
     if preview:
         row.update(preview)
@@ -109,8 +111,11 @@ def build_upload_row(
     metadata: dict[str, Any] | None = None,
     conversation_id: str | None = None,
     raster: raster_service.RasterInfo | None = None,
+    digests: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """The imagery row for a stored upload -- shared by single and pair uploads."""
+    """The imagery row for a stored upload -- shared by single and pair uploads.
+    `digests` (file_validator: sha256 / pixel_sha256) go in `metadata`, and
+    always win over any same-named key a client sent in its own metadata."""
     row: dict[str, Any] = {
         "name": name,
         "original_filename": original_filename,
@@ -132,6 +137,8 @@ def build_upload_row(
             if value is not None:
                 row[column] = value
         row["metadata"] = {**(metadata or {}), "raster": raster_metadata(raster)}
+    if digests:
+        row["metadata"] = {**(row["metadata"] or {}), **digests}
     return row
 
 
@@ -185,6 +192,7 @@ class PairImage:
     content: bytes
     content_type: str
     raster: raster_service.RasterInfo | None = None
+    digests: dict[str, str] | None = None
 
 
 def discard_uploaded(client, storage_paths: list[str | None]) -> None:
@@ -238,6 +246,7 @@ def store_image_pair(images: list[PairImage], conversation_id: str | None = None
             file_size=len(image.content),
             conversation_id=conversation_id,
             raster=image.raster,
+            digests=image.digests,
         )
         row["pair_id"] = pair_id
         row["pair_position"] = position
@@ -453,6 +462,8 @@ def build_validation_image(imagery_id: str, *, role: str = "single", modality_hi
         return ImageInput(filename=imagery_id, content_type=None, role=role, modality_hint=modality_hint, imagery_id=imagery_id)
 
     filename = row.get("original_filename") or row.get("name") or imagery_id
+    metadata = row.get("metadata") or {}
+    storage_path = row.get("storage_path")
     common = dict(
         filename=filename,
         content_type=row.get("mime_type"),
@@ -462,11 +473,18 @@ def build_validation_image(imagery_id: str, *, role: str = "single", modality_hi
         source=row.get("source"),
         imagery_id=str(row["id"]),
         size_bytes=row.get("file_size"),
+        storage_path=storage_path,
+        sha256=metadata.get("sha256"),
+        pixel_sha256=metadata.get("pixel_sha256"),
+        acquisition_date=row.get("acquisition_date"),
     )
 
-    properties = ((row.get("metadata") or {}).get("raster") or {}).get("properties")
+    properties = (metadata.get("raster") or {}).get("properties")
     if properties:
-        return ImageInput(**common, known_properties=properties)
+        # The original is only read if change detection has to compute a digest
+        # that wasn't stored at upload (rows uploaded before digests existed).
+        loader = (lambda: storage_service.download_file(get_supabase(), storage_path)) if storage_path else None
+        return ImageInput(**common, known_properties=properties, content_loader=loader)
 
     storage_path = row.get("storage_path")
     if not storage_path:
@@ -495,6 +513,13 @@ def build_change_detection_metadata(imagery_id: str, label: str) -> ChangeDetect
         sensor=image.sensor,
         source=image.source,
         imagery_id=image.imagery_id,
+        content_type=image.content_type,
+        storage_path=image.storage_path,
+        sha256=image.sha256,
+        pixel_sha256=image.pixel_sha256,
+        acquisition_date=image.acquisition_date,
+        content=image.content,
+        content_loader=image.content_loader,
     )
 
 

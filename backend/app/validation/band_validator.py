@@ -13,9 +13,14 @@ Two kinds of band name, handled differently:
   `GENERIC_BAND_ALIASES`, applied to every image.
 * **Sensor-specific band IDs** ("B04", "B8A", ...) mean different things on
   different missions (Sentinel-2 B8 = NIR, Landsat 8 B8 = panchromatic).
-  They are interpreted ONLY through the table of the sensor that
-  `sensors.identify_sensor` identified (`SENSOR_BAND_MAPS`). For an unknown
-  or unsupported sensor they stay raw: "B4" is never assumed to be red.
+  They are interpreted ONLY for Sentinel-2 (`SENSOR_BAND_MAPS`), including a
+  positional fallback for unnamed 13 / 12 / 4-band files. For any other
+  sensor they stay raw: "B4" is never assumed to be red.
+* **Cartosat** is addressed by raster index from `cartosat_bands.py`'s
+  config, never by names.
+* **Sentinel-1 / RISAT get no band validation** (per scope): self-describing
+  polarisation names are still READ (they tell modality), but no workflow
+  checks them.
 
 `positional_band_issues` is what enforces "VV -> VV and VH -> VH": for a
 multi-image workflow that requires the SAME band at every position (e.g.
@@ -28,11 +33,12 @@ from __future__ import annotations
 
 import re
 
+from app.validation import cartosat_bands
 from app.validation.errors import BAND_MISMATCH, BAND_MISSING, ValidationIssue
 from app.validation.schemas import RasterFacts
 from app.validation.sensors import SensorFamily, SensorIdentification
 
-SAR_POLARIZATIONS: tuple[str, ...] = ("vv", "vh", "hh", "hv")  # also the canonical ORDER (MCD-Mamba: VV, VH)
+SAR_POLARIZATIONS: tuple[str, ...] = ("vv", "vh", "hh", "hv")  # read for modality only; never validated
 
 # canonical band name -> self-describing tokens (band description / tag
 # value, case-insensitive). Sensor-independent by construction: no band IDs.
@@ -67,10 +73,8 @@ def _band_id_table(pairs: dict[str, str]) -> dict[str, str]:
     return table
 
 
-# Sensor-specific band-ID tables. Only a SUPPORTED, identified sensor's table
-# is ever applied. Sentinel-1 / RISAT: polarisation names are self-describing
-# (GENERIC_BAND_ALIASES), so they need no ID table; any other label (e.g.
-# RISAT compact-pol RH/RV) is reported as unrecognised, not guessed.
+# Sensor-specific band-ID tables -- Sentinel-2 only. Only an identified
+# Sentinel-2 file's descriptions are read through it.
 SENSOR_BAND_MAPS: dict[SensorFamily, dict[str, str]] = {
     SensorFamily.SENTINEL_2: _band_id_table({
         "1": "coastal", "2": "blue", "3": "green", "4": "red",
@@ -78,21 +82,17 @@ SENSOR_BAND_MAPS: dict[SensorFamily, dict[str, str]] = {
         "8": "nir", "8a": "nir_narrow", "9": "water_vapour", "10": "cirrus",
         "11": "swir1", "12": "swir2",
     }),
-    SensorFamily.SENTINEL_1: {},
-    SensorFamily.RISAT: {},
-    # Cartosat band IDs are deliberately NOT mapped: which band a Cartosat
-    # "B1".."B4" is depends on the product, and must come from the product's
-    # own metadata (see CARTOSAT_PRODUCTS). Explicit names ("red", "nir")
-    # still work through GENERIC_BAND_ALIASES.
-    SensorFamily.CARTOSAT: {},
 }
 
-# TODO(team): confirm from product metadata. Fill `band_map` (band ID ->
-# canonical name) per Cartosat product ONLY from the product's META file /
-# band descriptions -- never from an assumed B-number convention.
-CARTOSAT_PRODUCTS: dict[str, dict] = {
-    "Cartosat PAN": {"band_map": {}, "note": "TODO(team): confirm from product metadata"},
-    "Cartosat MX": {"band_map": {}, "note": "TODO(team): confirm from product metadata"},
+# Sentinel-2 band order for files whose bands carry NO names. Used only when
+# the sensor is confirmed Sentinel-2 by evidence other than the filename, and
+# the band count matches exactly.
+S2_POSITIONAL_ORDER: dict[int, tuple[str, ...]] = {
+    13: ("coastal", "blue", "green", "red", "red_edge_1", "red_edge_2", "red_edge_3", "nir", "nir_narrow",
+         "water_vapour", "cirrus", "swir1", "swir2"),  # L1C: B1..B8, B8A, B9, B10, B11, B12
+    12: ("coastal", "blue", "green", "red", "red_edge_1", "red_edge_2", "red_edge_3", "nir", "nir_narrow",
+         "water_vapour", "swir1", "swir2"),  # L2A: same without B10
+    4: ("blue", "green", "red", "nir"),  # B2, B3, B4, B8
 }
 
 # Required band -> bands that satisfy it (Sentinel-2 B8A is a NIR band too).
@@ -116,10 +116,20 @@ _GENERIC_WORD_ALIASES = sorted(
 def _sensor_table(sensor: SensorIdentification | None) -> dict[str, str]:
     if sensor is None or not sensor.is_supported or sensor.family is None:
         return {}
-    table = dict(SENSOR_BAND_MAPS.get(sensor.family, {}))
-    if sensor.family == SensorFamily.CARTOSAT and sensor.product in CARTOSAT_PRODUCTS:
-        table.update(CARTOSAT_PRODUCTS[sensor.product]["band_map"])
-    return table
+    return dict(SENSOR_BAND_MAPS.get(sensor.family, {}))
+
+
+def is_sentinel2(sensor: SensorIdentification | None) -> bool:
+    return sensor is not None and sensor.is_supported and sensor.family == SensorFamily.SENTINEL_2
+
+
+def _s2_positional(facts: RasterFacts, sensor: SensorIdentification | None) -> dict[str, int] | None:
+    if not is_sentinel2(sensor) or sensor.source == "filename":
+        return None
+    if any(facts.band_descriptions):
+        return None
+    order = S2_POSITIONAL_ORDER.get(facts.band_count or 0)
+    return {name: index for index, name in enumerate(order, start=1)} if order else None
 
 
 def _match_band_token(text: str, sensor_table: dict[str, str]) -> str | None:
@@ -145,11 +155,21 @@ def _match_band_token(text: str, sensor_table: dict[str, str]) -> str | None:
     return None
 
 
-def detect_named_bands(facts: RasterFacts, sensor: SensorIdentification | None = None) -> dict[str, int]:
-    """canonical band name -> 1-based band index, for every band this
-    raster's own metadata identifies. Never invents a name for an
-    undescribed band. `sensor` selects the sensor-specific band-ID table;
-    None / unknown / unsupported -> self-describing names only."""
+def detect_named_bands(facts: RasterFacts, sensor: SensorIdentification | None) -> dict[str, int]:
+    """canonical band name -> 1-based band index. `sensor` is REQUIRED (pass
+    None explicitly when there is none) and dispatches:
+
+    * Sentinel-2 -> its band-ID table (+ self-describing names), or the
+      positional fallback for an unnamed 13 / 12 / 4-band file;
+    * Cartosat -> the index-based config in cartosat_bands.py, nothing else;
+    * anything else (S1, RISAT, unknown, unsupported) -> self-describing
+      names only (e.g. "VV", "red"); "B4" etc. stay raw.
+    Never invents a name for an undescribed band."""
+    if cartosat_bands.is_cartosat(sensor):
+        return cartosat_bands.detect_bands(sensor, facts)
+    positional = _s2_positional(facts, sensor)
+    if positional is not None:
+        return positional
     sensor_table = _sensor_table(sensor)
     found: dict[str, int] = {}
 
@@ -200,9 +220,34 @@ def detect_named_bands(facts: RasterFacts, sensor: SensorIdentification | None =
     return found
 
 
+def band_identification_source(facts: RasterFacts, sensor: SensorIdentification | None) -> str | None:
+    """How bands were identified: "cartosat_config", "s2_positional", "names" or None."""
+    if not detect_named_bands(facts, sensor):
+        return None
+    if cartosat_bands.is_cartosat(sensor):
+        return "cartosat_config"
+    if _s2_positional(facts, sensor) is not None:
+        return "s2_positional"
+    return "names"
+
+
+def duplicate_bands(facts: RasterFacts, sensor: SensorIdentification | None) -> list[str]:
+    """Canonical bands that more than one raster band claims to be (e.g. two
+    bands both described "B04") -- a Sentinel-2 file must not repeat a band."""
+    table = _sensor_table(sensor)
+    seen: dict[str, int] = {}
+    for description in facts.band_descriptions:
+        canonical = _match_band_token(description, table) if description else None
+        if canonical:
+            seen[canonical] = seen.get(canonical, 0) + 1
+    return sorted(name for name, count in seen.items() if count > 1)
+
+
 def unrecognised_band_names(facts: RasterFacts, sensor: SensorIdentification | None = None) -> list[str]:
     """Band descriptions present in the file but not interpreted -- e.g. "B4"
     on an unknown sensor, or RISAT compact-pol "RH". Reported, never guessed."""
+    if cartosat_bands.is_cartosat(sensor):
+        return [d for d in facts.band_descriptions if d] if not cartosat_bands.layout_matches(sensor, facts) else []
     table = _sensor_table(sensor)
     return [d for d in facts.band_descriptions if d and _match_band_token(d, table) is None]
 
@@ -211,11 +256,6 @@ def ordered_bands(detected: dict[str, int]) -> list[str]:
     """Identified bands in the file's own band order -- what preprocessing
     would receive, so nothing downstream relies on set/dict iteration order."""
     return [name for name, _ in sorted(detected.items(), key=lambda item: item[1])]
-
-
-def sar_polarizations(detected: dict[str, int]) -> list[str]:
-    """SAR polarisations present, in the canonical VV, VH, HH, HV order."""
-    return [pol for pol in SAR_POLARIZATIONS if pol in detected]
 
 
 def has_band(detected: dict[str, int], band: str) -> bool:
@@ -230,8 +270,8 @@ def _missing_message(band: str, facts: RasterFacts, sensor: SensorIdentification
     message = f"Required band '{band}' was not found in this image."
     if band == "nir":
         message = "Required band 'nir' (near-infrared) was not found in this image; a NIR band is required."
-    if sensor is not None and sensor.family == SensorFamily.CARTOSAT and not detect_named_bands(facts, sensor):
-        return message + " Cartosat product band metadata not available, so its bands cannot be identified."
+    if cartosat_bands.is_cartosat(sensor) and not cartosat_bands.layout_matches(sensor, facts):
+        return message + " Cartosat product/band layout not recognised."
     raw = unrecognised_band_names(facts, sensor)
     if raw and (sensor is None or not sensor.is_supported):
         return message + (

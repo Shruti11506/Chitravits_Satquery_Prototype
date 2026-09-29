@@ -6,6 +6,7 @@ from PIL import Image
 from app.services import storage_service
 from tests.fakes import FakeApiError
 from tests.test_imagery_raster import _geotiff
+from tests.images import unique_color, unique_fill
 
 
 def _rgb_bytes(fmt: str) -> bytes:
@@ -15,7 +16,7 @@ def _rgb_bytes(fmt: str) -> bytes:
     # (plain RGB) for both, so a same-format/different-format pair is
     # otherwise a compatible pair by every OTHER check.
     buf = io.BytesIO()
-    Image.new("RGB", (8, 8), color=(10, 20, 30)).save(buf, format=fmt)
+    Image.new("RGB", (8, 8), color=unique_color()).save(buf, format=fmt)
     return buf.getvalue()
 
 
@@ -163,9 +164,11 @@ def test_pair_query_stores_both_image_ids(client, fake_supabase):
     # RGB bands), same dimensions, same CRS. A plain, non-georeferenced
     # visual pair (e.g. two JPEGs) would legitimately be rejected here; that
     # behaviour has its own dedicated tests (test_change_detection_validation.py).
-    geotiff_rgb = ("s.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
+    # Two DIFFERENT acquisitions: identical pixels are rejected as the same image.
+    t1 = ("s.tif", _geotiff(descriptions=["red", "green", "blue"]), "image/tiff")
+    t2 = ("s.tif", _geotiff(descriptions=["red", "green", "blue"], seed=1), "image/tiff")
     conversation_id = _conversation(client)
-    pair = _pair(client, geotiff_rgb, geotiff_rgb, conversation_id=conversation_id).json()["data"]
+    pair = _pair(client, t1, t2, conversation_id=conversation_id).json()["data"]
     response = client.post("/api/v1/analysis", json={
         "imagery_id": pair["image_1"]["id"],
         "comparison_imagery_id": pair["image_2"]["id"],

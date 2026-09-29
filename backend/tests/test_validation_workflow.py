@@ -7,7 +7,6 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 from app.validation.errors import (
-    AOI_OUTSIDE_IMAGE,
     BAND_MISMATCH,
     BAND_MISSING,
     GEOREFERENCE_MISSING,
@@ -20,10 +19,11 @@ from app.validation.errors import (
 )
 from app.validation.schemas import ImageInput
 from app.validation.service import validate_images
+from tests.images import unique_color, unique_fill
 
 
 def _geotiff(*, count=3, dtype="uint16", crs="EPSG:32643", width=64, height=48, descriptions=None):
-    data = np.zeros((count, height, width), dtype=dtype)
+    data = np.full((count, height, width), unique_fill(), dtype=dtype)
     with MemoryFile() as mem:
         with mem.open(
             driver="GTiff", width=width, height=height, count=count, dtype=dtype,
@@ -39,7 +39,7 @@ def _jpeg(width=40, height=30):
     import io
     from PIL import Image
     buf = io.BytesIO()
-    Image.new("RGB", (width, height)).save(buf, format="JPEG")
+    Image.new("RGB", (width, height), color=unique_color()).save(buf, format="JPEG")
     return buf.getvalue()
 
 
@@ -132,8 +132,6 @@ def test_too_many_bands_hit_the_resource_limit(monkeypatch):
     [
         ("ndvi", s2_multispectral, True, None),
         ("ndvi", rgb_jpeg, False, BAND_MISSING),
-        ("sar_vv_analysis", lambda: sar_vv(), True, None),
-        ("sar_vv_analysis", lambda: plain_geotiff(), False, MODALITY_MISMATCH),
         ("visual_vqa", rgb_jpeg, True, None),
         ("visual_vqa", plain_geotiff, True, None),  # Visual VQA / GeoTIFF -> VALID
     ],
@@ -145,19 +143,20 @@ def test_single_image_matrix(workflow, image_factory, expect_valid, expect_code)
         assert any(e.code == expect_code for e in result.errors)
 
 
-def test_vv_change_with_vv_both_times_is_valid():
-    result = validate_images(workflow="sar_change_vv", images=[
+def test_sar_change_with_vv_both_times_is_valid():
+    result = validate_images(workflow="bitemporal_change", images=[
         sar_vv(role="t1", imagery_id="t1"), sar_vv(role="t2", imagery_id="t2"),
     ])
     assert result.valid, result.errors
 
 
-def test_vv_change_with_a_vh_second_image_is_rejected():
-    result = validate_images(workflow="sar_change_vv", images=[
+def test_sar_change_does_not_validate_polarisation():
+    # Scope: no band/polarisation validation for Sentinel-1 / RISAT. A VV/VH
+    # pair has the same band count and modality, so it passes validation.
+    result = validate_images(workflow="bitemporal_change", images=[
         sar_vv(role="t1", imagery_id="t1"), sar_vh(role="t2", imagery_id="t2"),
     ])
-    assert result.valid is False
-    assert any(e.code == BAND_MISMATCH for e in result.errors)
+    assert result.valid, result.errors
 
 
 def test_optical_sar_with_both_present_is_valid():
@@ -183,32 +182,6 @@ def test_optical_sar_with_two_optical_images_is_rejected_by_role():
     ])
     assert result.valid is False
     assert any(e.code == WORKFLOW_INPUT_MISMATCH for e in result.errors)
-
-
-# ---- geospatial requirement driven by an AOI, not just the workflow ------------
-
-
-def test_rgb_jpeg_with_aoi_is_rejected_even_for_a_non_geospatial_workflow():
-    """visual_vqa itself doesn't require geospatial info, but an AOI can only
-    be checked against a georeferenced image (section 4)."""
-    aoi = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
-    result = validate_images(workflow="visual_vqa", images=[rgb_jpeg()], aoi=aoi)
-    assert result.valid is False
-    assert any(e.code == GEOREFERENCE_MISSING for e in result.errors)
-
-
-def test_aoi_intersecting_a_georeferenced_scene_passes():
-    # Scene bounds computed from the fixture's UTM 43N transform: ~13.02N, 77.55E.
-    aoi = {"type": "Polygon", "coordinates": [[[77.5, 13.0], [77.6, 13.0], [77.6, 13.1], [77.5, 13.1], [77.5, 13.0]]]}
-    result = validate_images(workflow="visual_vqa", images=[plain_geotiff()], aoi=aoi)
-    assert result.valid, result.errors
-
-
-def test_aoi_outside_scene_is_rejected():
-    aoi = {"type": "Polygon", "coordinates": [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]}
-    result = validate_images(workflow="visual_vqa", images=[plain_geotiff()], aoi=aoi)
-    assert result.valid is False
-    assert any(e.code == AOI_OUTSIDE_IMAGE for e in result.errors)
 
 
 # ---- the response always describes what was inspected --------------------------

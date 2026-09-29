@@ -41,8 +41,8 @@ def validate(payload: ValidationRequest) -> ApiResponse[ValidationResult]:
         )
         for image_ref in payload.images
     ]
-    aoi = payload.aoi.model_dump() if payload.aoi else None
-    result = validate_images(workflow=payload.workflow, images=images, aoi=aoi)
+    # payload.aoi is accepted for backward compatibility and ignored (AOI validation removed).
+    result = validate_images(workflow=payload.workflow, images=images)
     return ApiResponse.ok(result)
 
 

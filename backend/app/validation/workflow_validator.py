@@ -64,6 +64,9 @@ class WorkflowRequirements:
 # schemas/analysis.py for the closest existing concept) -- intentionally not
 # reused 1:1, since a request type ("general_analysis") isn't the same thing
 # as an input-shape requirement.
+# No SAR polarisation workflows: Sentinel-1 / RISAT get no band or
+# polarisation validation (scope decision); SAR change goes through
+# `bitemporal_change`, i.e. the change-detection validator.
 WORKFLOW_REGISTRY: dict[str, WorkflowRequirements] = {
     "visual_vqa": WorkflowRequirements(display_name="Visual VQA", required_images=1),
     "scene_captioning": WorkflowRequirements(display_name="Scene captioning", required_images=1),
@@ -76,33 +79,11 @@ WORKFLOW_REGISTRY: dict[str, WorkflowRequirements] = {
         required_bands=[["red", "nir"]],  # Sentinel-2 B8A (nir_narrow) also satisfies "nir"
         requires_known_sensor=True,
     ),
-    "sar_vv_analysis": WorkflowRequirements(
-        display_name="SAR VV analysis", required_images=1, allowed_modalities=["sar"], required_bands=[["vv"]]
-    ),
-    "sar_vh_analysis": WorkflowRequirements(
-        display_name="SAR VH analysis", required_images=1, allowed_modalities=["sar"], required_bands=[["vh"]]
-    ),
     "bitemporal_change": WorkflowRequirements(
         display_name="Bi-temporal change analysis",
         required_images=2,
         required_roles=["t1", "t2"],
         change_detection=ChangeDetectionRequirements(),
-    ),
-    "sar_change_vv": WorkflowRequirements(
-        display_name="SAR VV change analysis",
-        required_images=2,
-        allowed_modalities=["sar"],
-        required_bands=[["vv"], ["vv"]],
-        requires_geospatial=True,
-        required_roles=["t1", "t2"],
-    ),
-    "sar_change_vh": WorkflowRequirements(
-        display_name="SAR VH change analysis",
-        required_images=2,
-        allowed_modalities=["sar"],
-        required_bands=[["vh"], ["vh"]],
-        requires_geospatial=True,
-        required_roles=["t1", "t2"],
     ),
     "optical_sar_analysis": WorkflowRequirements(
         display_name="Optical + SAR analysis",
@@ -157,7 +138,7 @@ def structural_issues(workflow: WorkflowRequirements, images: list[ImageInput]) 
 
 
 def compatibility_issues(
-    workflow: WorkflowRequirements, images: list[ImageInput], facts: list[RasterFacts], *, aoi_present: bool
+    workflow: WorkflowRequirements, images: list[ImageInput], facts: list[RasterFacts]
 ) -> list[ValidationIssue]:
     """Per-image geospatial + modality + band checks against what `workflow` declares.
 
@@ -169,7 +150,7 @@ def compatibility_issues(
         return _change_detection_issues(workflow, images, facts)
 
     issues: list[ValidationIssue] = []
-    geospatial_required = workflow.requires_geospatial or aoi_present
+    geospatial_required = workflow.requires_geospatial
     sensors = [sensor_for(image, image_facts) for image, image_facts in zip(images, facts)]
 
     for image, image_facts, sensor in zip(images, facts, sensors):
@@ -237,6 +218,9 @@ def _change_detection_issues(
         metadata[role] = ChangeDetectionImageMetadata(
             label=label, facts=image_facts, extension=extension_of(image.filename), filename=image.filename,
             sensor=image.sensor, source=image.source, modality_hint=image.modality_hint, imagery_id=image.imagery_id,
+            content_type=image.content_type, storage_path=image.storage_path, sha256=image.sha256,
+            pixel_sha256=image.pixel_sha256, acquisition_date=image.acquisition_date, content=image.content,
+            content_loader=image.content_loader,
         )
     result = validate_change_detection_inputs(metadata["t1"], metadata["t2"], workflow.change_detection)
     issues = []

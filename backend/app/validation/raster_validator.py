@@ -18,6 +18,7 @@ import logging
 import warnings
 
 from PIL import Image, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
 
 from app.validation.errors import FILE_CORRUPTED, INVALID_DIMENSIONS, ValidationIssue
 from app.validation.schemas import ImageInput, RasterFacts
@@ -25,10 +26,12 @@ from app.validation.schemas import ImageInput, RasterFacts
 logger = logging.getLogger(__name__)
 
 TIFF_EXTENSIONS = {".tif", ".tiff"}
-PILLOW_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+PILLOW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SUPPORTED_EXTENSIONS = TIFF_EXTENSIONS | PILLOW_EXTENSIONS
 
-_PILLOW_FORMAT_NAME = {"JPEG": "JPEG", "PNG": "PNG"}
+_PILLOW_FORMAT_NAME = {"JPEG": "JPEG", "PNG": "PNG", "WEBP": "WEBP"}
+# Pillow mode -> numpy-style dtype of each channel (8-bit for everything else).
+_PILLOW_MODE_DTYPE = {"I;16": "uint16", "I;16L": "uint16", "I;16B": "uint16", "I": "int32", "F": "float32"}
 
 
 def extension_of(filename: str) -> str:
@@ -114,12 +117,16 @@ def _extract_pillow(content: bytes) -> RasterFacts:
                 width=img.width,
                 height=img.height,
                 band_count=band_count,
-                dtypes=["uint8"],  # Pillow decodes JPEG/PNG to 8-bit-per-channel
+                dtypes=[_PILLOW_MODE_DTYPE.get(img.mode, "uint8")] * band_count,
                 georeferenced=False,  # JPEG/PNG: never georeferenced by default -- section 4
             )
+    except DecompressionBombError as exc:
+        # Pillow refuses images this large before decoding them (decompression-bomb guard).
+        logger.info("Image rejected as too large to decode: %s", exc)
+        return RasterFacts(error="The image has too many pixels to be decoded safely.", error_code=INVALID_DIMENSIONS)
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         logger.info("Image could not be opened for validation: %s", exc)
-        return RasterFacts(error="The file could not be read as a valid JPEG/PNG image.")
+        return RasterFacts(error="The file could not be read as a valid JPEG/PNG/WebP image.")
 
 
 def facts_from_known_properties(properties: dict) -> RasterFacts:
@@ -175,7 +182,7 @@ def structure_issues(facts: RasterFacts, *, input_label: str) -> list[Validation
     alone is responsible for rejecting. Everything else (bands, CRS,
     modality) is a different validator's job, run only once structure is OK."""
     if facts.error:
-        return [ValidationIssue.of(FILE_CORRUPTED, facts.error, input=input_label)]
+        return [ValidationIssue.of(facts.error_code or FILE_CORRUPTED, facts.error, input=input_label)]
     if not facts.width or not facts.height or facts.width <= 0 or facts.height <= 0:
         return [ValidationIssue.of(
             INVALID_DIMENSIONS, "The image has zero or invalid width/height.", input=input_label

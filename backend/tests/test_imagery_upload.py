@@ -1,4 +1,8 @@
-def _upload(client, filename="scene.jpg", content=b"\xff\xd8\xff fake jpeg bytes", content_type="image/jpeg", **form):
+from tests.images import real_jpeg, real_png, real_tiff
+
+
+def _upload(client, filename="scene.jpg", content=None, content_type="image/jpeg", **form):
+    content = real_jpeg() if content is None else content
     return client.post(
         "/api/v1/imagery/upload",
         files={"file": (filename, content, content_type)},
@@ -32,13 +36,13 @@ def test_upload_imagery_success(client, fake_supabase):
 
 
 def test_upload_imagery_defaults_name_to_filename(client):
-    response = _upload(client, filename="unnamed_scene.png", content_type="image/png")
+    response = _upload(client, filename="unnamed_scene.png", content=real_png(), content_type="image/png")
     assert response.status_code == 201
     assert response.json()["data"]["name"] == "unnamed_scene.png"
 
 
 def test_upload_imagery_accepts_geotiff(client):
-    response = _upload(client, filename="raster.tif", content=b"fake tiff bytes", content_type="image/tiff")
+    response = _upload(client, filename="raster.tif", content=real_tiff(), content_type="image/tiff")
     assert response.status_code == 201
     assert response.json()["data"]["mime_type"] == "image/tiff"
 

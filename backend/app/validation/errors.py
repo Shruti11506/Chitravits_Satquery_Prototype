@@ -12,6 +12,8 @@ from pydantic import BaseModel
 # The list the task brief suggests, kept intact. A handful of additions
 # below are for situations the brief describes but doesn't name a code for;
 # each is commented with the rule it exists to serve.
+# Deprecated alias, no longer emitted: an unsupported extension is
+# UNSUPPORTED_FILE_TYPE everywhere now, the same code the upload route uses.
 UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
 FILE_CORRUPTED = "FILE_CORRUPTED"
 FILE_TOO_LARGE = "FILE_TOO_LARGE"
@@ -24,8 +26,6 @@ IMAGE_COUNT_MISMATCH = "IMAGE_COUNT_MISMATCH"
 CRS_MISSING = "CRS_MISSING"
 INVALID_CRS = "INVALID_CRS"
 GEOREFERENCE_MISSING = "GEOREFERENCE_MISSING"
-INVALID_AOI = "INVALID_AOI"
-AOI_OUTSIDE_IMAGE = "AOI_OUTSIDE_IMAGE"
 RESOURCE_LIMIT_EXCEEDED = "RESOURCE_LIMIT_EXCEEDED"
 WORKFLOW_INPUT_MISMATCH = "WORKFLOW_INPUT_MISMATCH"
 
@@ -45,10 +45,9 @@ NOT_DISTINCT_OBSERVATIONS = "NOT_DISTINCT_OBSERVATIONS"
 IMAGE_DIMENSION_MISMATCH = "IMAGE_DIMENSION_MISMATCH"  # T1/T2 pixel width/height differ, exact match required
 FILE_FORMAT_MISMATCH = "FILE_FORMAT_MISMATCH"  # T1/T2 raster formats differ (e.g. GeoTIFF vs JPEG)
 CRS_MISMATCH = "CRS_MISMATCH"  # both georeferenced, but to a different CRS -- never auto-reprojected here
-# Change detection: T1 and T2 are both of a KNOWN modality, but different ones
-# (e.g. RGB vs SAR). MODALITY_MISMATCH, by contrast, is one image against what
-# a workflow allows, or against its own `modality_hint`. Kept as-is: the
-# frontend and existing clients read it.
+# Deprecated, no longer emitted: incompatible T1/T2 modalities are
+# MODALITY_MISMATCH now, like every other modality conflict. Kept because the
+# frontend (changeDetectionValidation.js, apiClient.ts) still recognises it.
 IMAGE_TYPE_MISMATCH = "IMAGE_TYPE_MISMATCH"
 UNKNOWN_MODALITY = "UNKNOWN_MODALITY"  # Image modality / type cannot be determined (reserved; not emitted)
 # Not given a code by name in that brief, but its own section 3 calls this
@@ -59,26 +58,30 @@ ASPECT_RATIO_MISMATCH = "ASPECT_RATIO_MISMATCH"
 # Sensor scope (sensors.py): Sentinel-1, Sentinel-2, Cartosat, RISAT.
 UNKNOWN_SENSOR = "UNKNOWN_SENSOR"  # no sensor evidence, and the workflow needs sensor-specific interpretation
 UNSUPPORTED_SENSOR = "UNSUPPORTED_SENSOR"  # a sensor was recognised, but it is outside the supported four
-# SAR polarisations don't satisfy an explicitly configured requirement
-# (`expected_sar_polarizations` / `sar_polarization_policy="single_required"`).
-# A plain T1/T2 polarisation difference stays BAND_MISMATCH, as before.
-POLARIZATION_MISMATCH = "POLARIZATION_MISMATCH"
+# Warning code (never an error): T1/T2 share the sensor AND the acquisition time.
+SAME_ACQUISITION_TIME = "SAME_ACQUISITION_TIME"
 DTYPE_MISMATCH = "DTYPE_MISMATCH"  # T1/T2 pixel data types differ (e.g. uint16 vs float32)
+
+# File validation (file_validator.py) -- the same codes the upload route returns.
+EMPTY_FILE = "EMPTY_FILE"
+UNSUPPORTED_FILE_TYPE = "UNSUPPORTED_FILE_TYPE"  # extension not in the allowlist
+FILE_TYPE_MISMATCH = "FILE_TYPE_MISMATCH"  # magic bytes don't match the extension or the declared MIME type
+UNSUPPORTED_DTYPE = "UNSUPPORTED_DTYPE"  # pixel dtype outside uint8 / uint16 / int16 / float32
 
 ALL_CODES = frozenset({
     UNSUPPORTED_FORMAT, FILE_CORRUPTED, FILE_TOO_LARGE, INVALID_IMAGE, INVALID_DIMENSIONS,
     BAND_MISSING, BAND_MISMATCH, MODALITY_MISMATCH, IMAGE_COUNT_MISMATCH, CRS_MISSING,
-    INVALID_CRS, GEOREFERENCE_MISSING, INVALID_AOI, AOI_OUTSIDE_IMAGE, RESOURCE_LIMIT_EXCEEDED,
+    INVALID_CRS, GEOREFERENCE_MISSING, RESOURCE_LIMIT_EXCEEDED,
     WORKFLOW_INPUT_MISMATCH, UNKNOWN_WORKFLOW, IMAGE_UNAVAILABLE, NOT_DISTINCT_OBSERVATIONS,
     IMAGE_DIMENSION_MISMATCH, FILE_FORMAT_MISMATCH, CRS_MISMATCH, ASPECT_RATIO_MISMATCH,
-    IMAGE_TYPE_MISMATCH, UNKNOWN_MODALITY, UNKNOWN_SENSOR, UNSUPPORTED_SENSOR, POLARIZATION_MISMATCH,
-    DTYPE_MISMATCH,
+    IMAGE_TYPE_MISMATCH, UNKNOWN_MODALITY, UNKNOWN_SENSOR, UNSUPPORTED_SENSOR,
+    DTYPE_MISMATCH, EMPTY_FILE, UNSUPPORTED_FILE_TYPE, FILE_TYPE_MISMATCH, UNSUPPORTED_DTYPE,
 })
 
 
 class ValidationIssue(BaseModel):
     """One failed (or noteworthy) check. `input` names which input it's about,
-    e.g. an imagery id, a role ("T1"/"T2"), or "aoi" -- null for a
+    e.g. an imagery id or a role ("T1"/"T2") -- null for a
     request-level problem (e.g. an unknown workflow)."""
 
     code: str

@@ -26,6 +26,7 @@ from app.schemas.imagery import (
     ImageryUploadResponse,
 )
 from app.services import conversation_service, imagery_service, raster_service, storage_service
+from app.validation import file_validator
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,11 @@ async def upload_imagery(
     resolved_content_type = storage_service.validate_upload(
         filename=file.filename or "", content_type=file.content_type, size=len(content)
     )
+    # Every file-level check (magic bytes, MIME, readable, dimensions, dtype)
+    # plus the SHA-256 digests stored in metadata -- before anything is stored.
+    checked = await run_in_threadpool(file_validator.validate_file, file.filename, content, file.content_type)
+    if not checked.valid:
+        raise ValidationAppError(checked.issues[0].code, checked.issues[0].message)
 
     storage_path = storage_service.build_storage_path(file.filename)
     settings = get_settings()
@@ -119,6 +125,7 @@ async def upload_imagery(
             conversation_id=str(conversation_id) if conversation_id else None,
             raster=raster,
             preview=preview,
+            digests=checked.digests(),
         )
     except Exception:
         # No row -> don't leave the objects this request stored behind.
@@ -190,7 +197,12 @@ async def upload_imagery_pair(
             )
         except ValidationAppError as exc:
             raise ValidationAppError(exc.code, f"{label}: {exc.message}") from exc
-        images.append(imagery_service.PairImage(filename=upload.filename, content=content, content_type=content_type))
+        checked = await run_in_threadpool(file_validator.validate_file, upload.filename, content, upload.content_type)
+        if not checked.valid:
+            raise ValidationAppError(checked.issues[0].code, f"{label}: {checked.issues[0].message}")
+        images.append(imagery_service.PairImage(
+            filename=upload.filename, content=content, content_type=content_type, digests=checked.digests()
+        ))
 
     logger.info(
         "Received image pair: %s (%d bytes) + %s (%d bytes)",

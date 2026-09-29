@@ -1,8 +1,8 @@
 """Geospatial Validation (task brief section 4).
 
 Only runs when geospatial info is actually required -- by the workflow
-(`WorkflowRequirements.requires_geospatial`) or because the request carries
-an AOI (an AOI can only be checked against a georeferenced image). When it
+(`WorkflowRequirements.requires_geospatial`, or a change-detection pair's
+`ChangeDetectionRequirements`). When it
 isn't required, this module has nothing to say: a plain JPEG passes a
 Visual-VQA workflow untouched, exactly as section 4 asks.
 
@@ -26,7 +26,7 @@ def geospatial_issues(facts: RasterFacts, *, input_label: str, required: bool, e
         return [ValidationIssue.of(
             GEOREFERENCE_MISSING,
             "JPEG/PNG images carry no geospatial information. Upload a georeferenced "
-            "GeoTIFF for this workflow, or omit the AOI.",
+            "GeoTIFF for this workflow.",
             input=input_label,
         )]
 

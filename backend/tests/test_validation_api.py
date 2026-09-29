@@ -7,12 +7,13 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 from app.services import imagery_service, storage_service
+from tests.images import unique_color, unique_fill
 
 ENDPOINT = "/api/v1/validation/validate"
 
 
 def _geotiff(*, count=13, descriptions=None, crs="EPSG:32643"):
-    data = np.zeros((count, 48, 64), dtype="uint16")
+    data = np.full((count, 48, 64), unique_fill(), dtype="uint16")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=64, height=48, count=count, dtype="uint16", crs=crs, transform=from_origin(776000, 1440000, 10, 10)) as dst:
             dst.write(data)
@@ -25,7 +26,7 @@ def _jpeg():
     import io
     from PIL import Image
     buf = io.BytesIO()
-    Image.new("RGB", (40, 30)).save(buf, format="JPEG")
+    Image.new("RGB", (40, 30), color=unique_color()).save(buf, format="JPEG")
     return buf.getvalue()
 
 
@@ -91,20 +92,22 @@ def test_two_image_bitemporal_request_via_api(client, fake_supabase):
     t2 = _upload_tiff(client, filename="t2.tif", count=1, descriptions=["VV"])
 
     response = client.post(ENDPOINT, json={
-        "workflow": "sar_change_vv",
+        "workflow": "bitemporal_change",
         "images": [{"imagery_id": t1["id"], "role": "t1"}, {"imagery_id": t2["id"], "role": "t2"}],
     })
     body = response.json()["data"]
     assert body["status"] == "VALID", body["errors"]
 
 
-def test_aoi_outside_a_real_uploaded_scenes_bounds_via_api(client, fake_supabase):
+def test_aoi_field_is_accepted_and_ignored(client, fake_supabase):
+    """AOI validation was removed; old clients that still send `aoi` keep working."""
     uploaded = _upload_tiff(client, descriptions=["red", "green", "blue"] + ["b"] * 10)
     aoi = {"type": "Polygon", "coordinates": [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]}
     response = client.post(ENDPOINT, json={"workflow": "visual_vqa", "images": [{"imagery_id": uploaded["id"]}], "aoi": aoi})
+    assert response.status_code == 200
     body = response.json()["data"]
-    assert body["status"] == "REJECT"
-    assert body["errors"][0]["code"] == "AOI_OUTSIDE_IMAGE"
+    assert body["status"] == "VALID", body["errors"]
+    assert not any("AOI" in e["code"] for e in body["errors"])
 
 
 def test_known_properties_path_never_re_downloads_the_original(client, fake_supabase, monkeypatch):

@@ -9,6 +9,7 @@ from rasterio.transform import from_origin
 from app.services import raster_service
 from tests.fakes import FakeApiError
 from tests.test_imagery_raster import _geotiff
+from tests.images import real_png
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -85,20 +86,18 @@ def test_user_metadata_is_kept_next_to_raster_facts(client, fake_supabase):
     assert metadata["note"] == "field trip" and "raster" in metadata
 
 
-def test_unreadable_tiff_uploads_with_a_failed_preview(client, fake_supabase):
+def test_unreadable_tiff_is_rejected_at_upload_and_nothing_is_stored(client, fake_supabase):
+    # Upload now runs full file validation: a TIFF whose header can't be
+    # parsed is FILE_CORRUPTED (it used to be stored with preview "failed").
     response = _upload(client, "broken.tif", b"II*\x00 not really a tiff")
-    assert response.status_code == 201  # the original is still stored for later
-    data = response.json()["data"]
-    assert data["preview_status"] == "failed" and data["preview_path"] is None and data["thumbnail_url"] is None
-    assert data["raster"]["preview_error"] == raster_service.UNREADABLE_MESSAGE
-    assert list(fake_supabase.storage.objects) == [f"Satquery/{data['storage_path']}"]
-
-    fetched = client.get(f"/api/v1/imagery/{data['id']}").json()["data"]
-    assert fetched["preview_status"] == "failed" and fetched["url"]
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "FILE_CORRUPTED"
+    assert fake_supabase.storage.objects == {}
+    assert fake_supabase.store.get("imagery", []) == []
 
 
 def test_png_rows_get_no_preview_fields(client, fake_supabase):
-    data = _upload(client, "photo.png", b"\x89PNG fake", "image/png").json()["data"]
+    data = _upload(client, "photo.png", real_png(), "image/png").json()["data"]
     assert data["preview_status"] is None and data["preview_path"] is None and data["raster"] is None
     assert "preview_status" not in fake_supabase.store["imagery"][0]
 

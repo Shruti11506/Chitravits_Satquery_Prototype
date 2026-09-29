@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.title_service import generate_conversation_title
+from tests.images import real_tiff
 
 
 def _new_conversation(client):
@@ -12,7 +13,7 @@ def _new_conversation(client):
 def _upload(client, conversation_id, filename="S2A_MSIL2A_20230804_004E043.tif"):
     return client.post(
         "/api/v1/imagery/upload",
-        files={"file": (filename, b"II*\x00 fake tiff bytes", "image/tiff")},
+        files={"file": (filename, real_tiff(), "image/tiff")},
         data={"name": filename, "conversation_id": conversation_id},
     )
 
@@ -237,9 +238,11 @@ def test_delete_conversation_removes_queries_uploads_and_files(client, fake_supa
     assert client.get(f"/api/v1/conversations/{cid}").status_code == 404
     assert [j["conversation_id"] for j in fake_supabase.store["analysis_jobs"]] == [other]
     assert [i["id"] for i in fake_supabase.store["imagery"]] == [other_imagery]
-    assert list(fake_supabase.storage.objects) == [
-        k for k in fake_supabase.storage.objects if k.endswith("/keep.tif")
-    ]
+    # Only the kept upload's objects remain: its original and (real TIFF) its preview.
+    kept = [k for k in fake_supabase.storage.objects if k.endswith("/keep.tif")]
+    assert len(kept) == 1
+    kept_folder = kept[0].rsplit("/", 1)[0]
+    assert all(k.startswith(kept_folder + "/") for k in fake_supabase.storage.objects)
 
 
 def test_legacy_requests_without_conversation_still_work(client):

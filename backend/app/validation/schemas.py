@@ -14,7 +14,7 @@ package docstring in `__init__.py` for why. Two kinds of shape live here:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -36,16 +36,6 @@ Modality = Literal["optical", "rgb", "multispectral", "sar", "optical_sar", "unk
 # ---- Wire request ------------------------------------------------------------
 
 
-class AOIInput(BaseModel):
-    """A GeoJSON geometry object, e.g. {"type": "Polygon", "coordinates": [...]}.
-
-    Validated structurally by aoi_validator.py; not a full GeoJSON Feature.
-    """
-
-    type: str
-    coordinates: Any
-
-
 class ValidationImageRef(BaseModel):
     """One already-uploaded image to check, by reference -- never re-uploads
     the file (see CLAUDE.md "Database & storage notes" / section 14 of the brief)."""
@@ -62,7 +52,8 @@ class ValidationRequest(BaseModel):
 
     workflow: str = Field(..., description="A key in workflow_validator.WORKFLOW_REGISTRY, e.g. 'ndvi'.")
     images: list[ValidationImageRef] = Field(..., min_length=1)
-    aoi: AOIInput | None = None
+    # AOI validation removed; field accepted for backward compatibility (never read).
+    aoi: dict[str, Any] | None = None
     query: str | None = Field(default=None, max_length=2000, description="Free text, carried through but not parsed.")
 
     @field_validator("workflow")
@@ -145,6 +136,14 @@ class ImageInput:
     size_bytes: int | None = None
     content: bytes | None = None
     known_properties: dict[str, Any] | None = None
+    # From the imagery row (all optional): what change detection's
+    # same-image check compares, and a lazy reader for the original when a
+    # digest has to be computed (never called unless needed).
+    storage_path: str | None = None
+    sha256: str | None = None
+    pixel_sha256: str | None = None
+    acquisition_date: str | None = None
+    content_loader: Callable[[], bytes] | None = None
 
 
 @dataclass
@@ -164,10 +163,17 @@ class ChangeDetectionImageMetadata:
     source: str | None = None
     modality_hint: ModalityHint | None = None
     imagery_id: str | None = None
+    content_type: str | None = None
+    # Same-image detection (see ImageInput): storage object, stored digests,
+    # the bytes when already in memory, and a lazy reader otherwise.
+    storage_path: str | None = None
+    sha256: str | None = None
+    pixel_sha256: str | None = None
+    acquisition_date: str | None = None
+    content: bytes | None = None
+    content_loader: Callable[[], bytes] | None = None
 
 
-SarPolarizationPolicy = Literal["match_all", "single_required"]
-SarPolarization = Literal["vv", "vh", "hh", "hv"]
 
 
 @dataclass(frozen=True)
@@ -177,11 +183,11 @@ class ChangeDetectionRequirements:
     never means editing the validator itself. See CHAT_GATE_REQUIREMENTS /
     STRICT_REQUIREMENTS below for the two profiles the API uses."""
 
-    # None disables the aspect-ratio check (reported "skipped", never "pass").
-    aspect_ratio_tolerance: float | None = 0.01
-    # False only for a future, non-pixel-registered workflow -- the
-    # prototype's own change-detection path needs identical rasters.
-    require_exact_dimensions: bool = True
+    # Deferred quality gates: OFF by default (reported "skipped", never
+    # "pass"). The chat profile turns both on until the change-detection
+    # model's input requirements are pinned down.
+    aspect_ratio_tolerance: float | None = None
+    require_exact_dimensions: bool = False
     require_matching_format: bool = True
     # True: BOTH images must be georeferenced (a JPEG/PNG fails, and the
     # error names which image). False: see `geospatial_when_present`.
@@ -196,29 +202,22 @@ class ChangeDetectionRequirements:
     # DTYPE_MISMATCH when T1/T2 pixel data types differ. No per-sensor dtype
     # allowlist -- TODO(team) if a model ever needs one.
     require_matching_dtype: bool = True
-    # "match_all": T1 and T2 must carry the same polarisation SET (VV+VH <->
-    # VV+VH is fine). "single_required": each image exactly one polarisation.
-    sar_polarization_policy: SarPolarizationPolicy = "match_all"
-    # When set (e.g. ("vv", "vh") for a model trained on VV+VH), each image's
-    # polarisations must equal it, else POLARIZATION_MISMATCH. None = no
-    # model-specific requirement.
-    expected_sar_polarizations: tuple[str, ...] | None = None
+    # No SAR polarisation settings: Sentinel-1 / RISAT get no band validation.
 
     def with_overrides(self, **overrides: Any) -> "ChangeDetectionRequirements":
         """Copy with every non-None override applied (API request fields)."""
-        values = {key: value for key, value in overrides.items() if value is not None}
-        if "expected_sar_polarizations" in values:
-            values["expected_sar_polarizations"] = tuple(values["expected_sar_polarizations"])
-        return replace(self, **values)
+        return replace(self, **{key: value for key, value in overrides.items() if value is not None})
 
 
 # The default for image pairs in the chat -- `POST /analysis` and
 # `POST /validation/change-detection` (which the frontend calls after every
 # pair upload). Demo-friendly: sensor evidence optional, and geospatial
 # checks only when an image actually carries georeferencing, so two plain
-# JPEG/PNG images still pair. Modality, bands, dimensions and dtype are
-# still enforced.
-CHAT_GATE_REQUIREMENTS = ChangeDetectionRequirements(require_geospatial=False, geospatial_when_present=True)
+# JPEG/PNG images still pair. Modality, bands, dimensions (the deferred
+# gates, kept ON here) and dtype are still enforced.
+CHAT_GATE_REQUIREMENTS = ChangeDetectionRequirements(
+    require_geospatial=False, geospatial_when_present=True, aspect_ratio_tolerance=0.01, require_exact_dimensions=True
+)
 # Opt-in (`"profile": "strict"`): the sensor must be one of the four
 # supported ones, and both images must be georeferenced.
 STRICT_REQUIREMENTS = ChangeDetectionRequirements(require_geospatial=True, require_known_sensor=True)
@@ -249,6 +248,7 @@ class RasterFacts:
     band_tags: list[dict[str, str]] = field(default_factory=list)
     units: list[str | None] = field(default_factory=list)
     error: str | None = None
+    error_code: str | None = None  # set when `error` isn't plain corruption (e.g. INVALID_DIMENSIONS)
 
 
 # ---- Change Detection Input Validation (its own wire contract) --------------
@@ -331,8 +331,9 @@ class ChangeDetectionRequest(BaseModel):
     require_geospatial: bool | None = None
     require_known_sensor: bool | None = None
     require_matching_dtype: bool | None = None
-    sar_polarization_policy: SarPolarizationPolicy | None = None
-    expected_sar_polarizations: list[SarPolarization] | None = None
+    # SAR polarisation validation removed; fields accepted for backward compatibility (never read).
+    sar_polarization_policy: str | None = None
+    expected_sar_polarizations: list[str] | None = None
 
     def requirements(self) -> ChangeDetectionRequirements:
         base = STRICT_REQUIREMENTS if self.profile == "strict" else CHAT_GATE_REQUIREMENTS
@@ -343,8 +344,6 @@ class ChangeDetectionRequest(BaseModel):
             require_geospatial=self.require_geospatial,
             require_known_sensor=self.require_known_sensor,
             require_matching_dtype=self.require_matching_dtype,
-            sar_polarization_policy=self.sar_polarization_policy,
-            expected_sar_polarizations=self.expected_sar_polarizations,
         )
 
 

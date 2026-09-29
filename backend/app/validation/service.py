@@ -3,7 +3,7 @@
 `validate_images` is the one entry point: FastAPI route -> here -> file
 validator -> raster/image metadata extractor -> geospatial validator ->
 modality validator -> band validator -> workflow compatibility validator ->
-AOI validator -> resource-limit validator -> `ValidationResult`.
+resource-limit validator -> `ValidationResult`. (AOI validation was removed.)
 
 This module (and everything it imports under `app/validation/`) never
 touches Supabase, LangGraph, or any model -- it operates purely on
@@ -20,8 +20,8 @@ from __future__ import annotations
 import logging
 import uuid
 
-from app.validation import aoi_validator, band_validator, file_validator, modality_validator, raster_validator, workflow_validator
-from app.validation.errors import IMAGE_UNAVAILABLE, UNSUPPORTED_FORMAT, ValidationIssue
+from app.validation import band_validator, file_validator, modality_validator, raster_validator, workflow_validator
+from app.validation.errors import IMAGE_UNAVAILABLE, ValidationIssue
 from app.validation.limits import check_band_count, check_dimensions, check_image_count, current_limits
 from app.validation.raster_validator import extension_of
 from app.validation.schemas import ImageInput, RasterFacts, ValidatedImageInfo, ValidationResult
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def validate_images(
-    *, workflow: str, images: list[ImageInput], aoi: dict | None = None, request_id: str | None = None
+    *, workflow: str, images: list[ImageInput], request_id: str | None = None
 ) -> ValidationResult:
     request_id = request_id or uuid.uuid4().hex[:12]
     # Filenames/ids only -- never file contents, never Supabase credentials.
@@ -60,13 +60,11 @@ def validate_images(
     struct_issues = workflow_validator.structural_issues(wf, images)
     errors.extend(struct_issues)
 
-    # Compatibility (bands/modality/geospatial/AOI) only makes sense once the
+    # Compatibility (bands/modality/geospatial) only makes sense once the
     # request shape is right AND every file actually opened -- otherwise
     # this would just pile confusing secondary errors on top of the real one.
     if not struct_issues and not any(f.error for f in facts_list):
-        errors.extend(workflow_validator.compatibility_issues(wf, images, facts_list, aoi_present=aoi is not None))
-        if aoi is not None:
-            errors.extend(_aoi_issues(aoi, images, facts_list))
+        errors.extend(workflow_validator.compatibility_issues(wf, images, facts_list))
 
     logger.info(
         "validation %s id=%s workflow=%s error_count=%d",
@@ -85,24 +83,25 @@ def _inspect(image: ImageInput, limits, errors: list[ValidationIssue]) -> Raster
         # Nothing to inspect at all -- an unresolved imagery_id or a Storage
         # object that no longer exists (imagery_service.build_validation_image).
         # Checked before format_issues so a placeholder filename never
-        # produces a confusing, unrelated UNSUPPORTED_FORMAT on top of this.
+        # produces a confusing, unrelated UNSUPPORTED_FILE_TYPE on top of this.
         facts = RasterFacts(error="No file content was available to inspect.")
         errors.append(ValidationIssue.of(IMAGE_UNAVAILABLE, facts.error, input=label))
         return facts
 
     format_issues = file_validator.format_issues(image)
     errors.extend(format_issues)
-    if any(issue.code == UNSUPPORTED_FORMAT for issue in format_issues):
-        # Already rejected for its extension -- don't also try (and fail) to
-        # open it, which would just add a redundant FILE_CORRUPTED on top.
-        return RasterFacts(error="Unsupported format.")
+    if format_issues:
+        # Already rejected at the byte level (file_validator) -- don't also try
+        # (and fail) to open it, which would just add a redundant FILE_CORRUPTED.
+        return RasterFacts(error="Rejected by file validation.")
 
     if image.known_properties is not None:
         facts = raster_validator.facts_from_known_properties(image.known_properties)
     else:
         facts = raster_validator.extract_from_bytes(image.content, image.filename)
 
-    errors.extend(raster_validator.structure_issues(facts, input_label=label))
+    # Readable, dimensions / pixel ceiling, band count, dtype (file_validator).
+    errors.extend(file_validator.facts_issues(facts, input_label=label))
     if facts.error:
         return facts
 
@@ -150,11 +149,3 @@ def _describe(image: ImageInput, facts: RasterFacts) -> ValidatedImageInfo:
         sensor_source=sensor.source if sensor else None,
         modality_source=modality_source,
     )
-
-
-def _aoi_issues(aoi: dict, images: list[ImageInput], facts_list: list[RasterFacts]) -> list[ValidationIssue]:
-    geom, issue = aoi_validator.parse_aoi(aoi)
-    if issue:
-        return [issue]
-    labeled = [(image.imagery_id or image.filename, facts) for image, facts in zip(images, facts_list)]
-    return aoi_validator.intersection_issues(geom, labeled)

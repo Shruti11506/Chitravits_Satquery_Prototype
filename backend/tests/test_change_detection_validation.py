@@ -12,15 +12,16 @@ from app.validation.errors import (
     ASPECT_RATIO_MISMATCH,
     BAND_MISMATCH,
     CRS_MISMATCH,
+    CRS_MISSING,
     FILE_CORRUPTED,
     FILE_FORMAT_MISMATCH,
     GEOREFERENCE_MISSING,
     IMAGE_DIMENSION_MISMATCH,
-    IMAGE_TYPE_MISMATCH,
     MODALITY_MISMATCH,
     NOT_DISTINCT_OBSERVATIONS,
 )
 from app.validation.schemas import ChangeDetectionImageMetadata, ChangeDetectionRequirements
+from tests.images import unique_color, unique_fill
 
 ENDPOINT = "/api/v1/validation/change-detection"
 
@@ -30,7 +31,7 @@ ENDPOINT = "/api/v1/validation/change-detection"
 
 def _geotiff(*, descriptions, crs="EPSG:32643", width=64, height=48, count=None, tags=None, band_tags=None):
     count = count if count is not None else (len(descriptions) or 1)
-    data = np.zeros((count, height, width), dtype="uint16")
+    data = np.full((count, height, width), unique_fill(), dtype="uint16")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=width, height=height, count=count, dtype="uint16", crs=crs, transform=from_origin(776000, 1440000, 10, 10)) as dst:
             dst.write(data)
@@ -46,7 +47,7 @@ def _geotiff(*, descriptions, crs="EPSG:32643", width=64, height=48, count=None,
 
 def _plain_tiff(*, width=64, height=48, count=1):
     """A TIFF with no CRS -- readable, but not georeferenced."""
-    data = np.zeros((count, height, width), dtype="uint8")
+    data = np.full((count, height, width), unique_fill(), dtype="uint8")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=width, height=height, count=count, dtype="uint8") as dst:
             dst.write(data)
@@ -57,7 +58,7 @@ def _jpeg(width=64, height=48):
     import io
     from PIL import Image
     buf = io.BytesIO()
-    Image.new("RGB", (width, height)).save(buf, format="JPEG")
+    Image.new("RGB", (width, height), color=unique_color()).save(buf, format="JPEG")
     return buf.getvalue()
 
 
@@ -71,6 +72,8 @@ def _meta(label, content, filename, *, imagery_id=None, sensor=None) -> ChangeDe
 
 
 REQS = ChangeDetectionRequirements()
+# The deferred dimension gates are off by default; these tests exercise them explicitly.
+GATES_ON = ChangeDetectionRequirements(aspect_ratio_tolerance=0.01, require_exact_dimensions=True)
 
 
 def sar_vv(label="T1", crs="EPSG:32643", imagery_id=None, **raster_kw):
@@ -123,7 +126,7 @@ def test_different_dates_same_everything_else_is_valid():
 def test_optical_vs_sar_is_rejected():
     result = validate_change_detection_inputs(optical_scene("T1", imagery_id="a"), sar_vv("T2", imagery_id="b"), REQS)
     assert result.valid is False
-    assert result.errors[0].code in (MODALITY_MISMATCH, IMAGE_TYPE_MISMATCH)
+    assert result.errors[0].code == MODALITY_MISMATCH
     assert result.errors[0].t1 == "RGB" and result.errors[0].t2 == "SAR"
 
 
@@ -134,7 +137,7 @@ def test_rgb_vs_sar_is_rejected():
     no_format_check = ChangeDetectionRequirements(require_matching_format=False, require_geospatial=False)
     result = validate_change_detection_inputs(jpeg_scene("T1", imagery_id="a"), sar_vv("T2", imagery_id="b"), no_format_check)
     assert result.valid is False
-    assert result.errors[0].code in (MODALITY_MISMATCH, IMAGE_TYPE_MISMATCH)
+    assert result.errors[0].code == MODALITY_MISMATCH
     assert result.errors[0].t1 == "RGB"
 
 
@@ -144,7 +147,7 @@ def test_multispectral_vs_optical_is_rejected():
     t2 = optical_scene("T2", imagery_id="b")
     result = validate_change_detection_inputs(t1, t2, REQS)
     assert result.valid is False
-    assert result.errors[0].code in (MODALITY_MISMATCH, IMAGE_TYPE_MISMATCH)
+    assert result.errors[0].code == MODALITY_MISMATCH
     assert result.errors[0].t1 == "Multispectral" and result.errors[0].t2 == "RGB"
 
 
@@ -170,7 +173,7 @@ def test_same_aspect_ratio_different_resolution_is_not_rejected_on_ratio_alone()
 def test_different_aspect_ratio_is_rejected():
     t1 = optical_scene("T1", width=1920, height=1080, imagery_id="a")  # 1.778
     t2 = optical_scene("T2", width=1024, height=768, imagery_id="b")  # 1.333
-    result = validate_change_detection_inputs(t1, t2, REQS)
+    result = validate_change_detection_inputs(t1, t2, GATES_ON)
     assert result.valid is False
     assert result.errors[0].code == ASPECT_RATIO_MISMATCH
 
@@ -197,7 +200,7 @@ def test_identical_dimensions_pass():
 def test_mismatched_dimensions_rejected_with_specific_code():
     t1 = optical_scene("T1", width=200, height=200, imagery_id="a")
     t2 = optical_scene("T2", width=100, height=100, imagery_id="b")  # same ratio, different size
-    result = validate_change_detection_inputs(t1, t2, REQS)
+    result = validate_change_detection_inputs(t1, t2, GATES_ON)
     assert result.valid is False
     assert result.errors[0].code == IMAGE_DIMENSION_MISMATCH
     assert result.errors[0].t1 == "200x200" and result.errors[0].t2 == "100x100"
@@ -245,23 +248,23 @@ def test_vh_vh_is_valid():
     assert result.valid is True, result.errors
 
 
-def test_vv_vh_is_rejected_never_silently_paired():
+def test_vv_vh_pair_gets_no_polarisation_validation():
+    # Scope: no band/polarisation validation for Sentinel-1 / RISAT.
     result = validate_change_detection_inputs(sar_vv("T1", imagery_id="a"), sar_vh("T2", imagery_id="b"), REQS)
-    assert result.valid is False
-    assert result.errors[0].code == BAND_MISMATCH
-    assert result.errors[0].t1 == "VV" and result.errors[0].t2 == "VH"
+    assert result.valid is True, result.errors
+    assert result.check_details["band_identity"].status == "skipped"
 
 
-def test_unidentifiable_sar_polarization_is_not_silently_valid():
+def test_unidentifiable_sar_polarization_is_not_band_validated():
     t1 = sar_vv("T1", imagery_id="a")
     t2 = _meta("T2", _geotiff(descriptions=[""]), "s1.tif", imagery_id="b")  # SAR-ish but no band name at all
     # Force modality to sar via hint since an unnamed single band alone is "unknown".
     t2.modality_hint = "sar"
     t1.modality_hint = "sar"
     result = validate_change_detection_inputs(t1, t2, REQS)
-    assert result.valid is False
-    assert result.errors[0].code == BAND_MISMATCH
-    assert result.errors[0].t2 == "unidentified"
+    # No SAR band validation: an unnamed SAR band is not an error by itself.
+    assert result.valid is True, result.errors
+    assert result.check_details["band_compatibility"].status == "skipped"
 
 
 # ---- section 7: file format ------------------------------------------------------
@@ -318,16 +321,16 @@ def test_missing_georeference_is_rejected_before_crs_comparison():
     t2.modality_hint = "sar"
     result = validate_change_detection_inputs(t1, t2, REQS)
     assert result.valid is False
-    # T1 has no identifiable VV/VH band, so the strict SAR rule (never treat
-    # an unconfirmed pair as valid) correctly fires before geospatial is
-    # even reached -- exercise CRS_MISSING in isolation via require_geospatial below instead.
-    assert result.errors[0].code == BAND_MISMATCH
+    # SAR gets no band validation, so the geospatial check is what fires --
+    # on T1 specifically, before any CRS comparison.
+    assert result.errors[0].code == CRS_MISSING
+    assert result.errors[0].t1 == "T1" and result.errors[0].t2 is None
 
 
 def _sar_vv_no_crs() -> ChangeDetectionImageMetadata:
     """A readable, named-VV-band TIFF with no CRS at all -- isolates the
     geospatial-completeness check from band/modality agreement."""
-    data = np.zeros((1, 48, 64), dtype="uint16")
+    data = np.full((1, 48, 64), unique_fill(), dtype="uint16")
     with MemoryFile() as mem:
         with mem.open(driver="GTiff", width=64, height=48, count=1, dtype="uint16") as dst:
             dst.write(data)
@@ -382,7 +385,7 @@ def test_stops_at_the_first_failing_step_only():
     result = validate_change_detection_inputs(t1, t2, REQS)
     assert result.valid is False
     assert len(result.errors) == 1
-    assert result.errors[0].code in (MODALITY_MISMATCH, IMAGE_TYPE_MISMATCH)
+    assert result.errors[0].code == MODALITY_MISMATCH
 
 
 # ---- section 16: never auto-fixes -------------------------------------------------
@@ -417,13 +420,12 @@ def test_valid_vv_pair_via_api(client, fake_supabase):
     assert body["workflow"] == "change_detection"
 
 
-def test_vv_vh_pair_rejected_via_api(client, fake_supabase):
+def test_vv_vh_pair_via_api_gets_no_polarisation_validation(client, fake_supabase):
     t1 = _upload(client, "t1.tif", _geotiff(descriptions=["VV"]))
     t2 = _upload(client, "t2.tif", _geotiff(descriptions=["VH"]))
     response = client.post(ENDPOINT, json={"t1_imagery_id": t1["id"], "t2_imagery_id": t2["id"]})
     body = response.json()["data"]
-    assert body["status"] == "REJECT"
-    assert body["errors"][0]["code"] == "BAND_MISMATCH"
+    assert body["status"] == "VALID", body["errors"]
 
 
 def test_optical_vs_sar_rejected_via_api(client, fake_supabase):
@@ -432,7 +434,7 @@ def test_optical_vs_sar_rejected_via_api(client, fake_supabase):
     response = client.post(ENDPOINT, json={"t1_imagery_id": t1["id"], "t2_imagery_id": t2["id"]})
     body = response.json()["data"]
     assert body["status"] == "REJECT"
-    assert body["errors"][0]["code"] in ("MODALITY_MISMATCH", "IMAGE_TYPE_MISMATCH")
+    assert body["errors"][0]["code"] == "MODALITY_MISMATCH"
     assert body["errors"][0]["t1"] == "RGB" and body["errors"][0]["t2"] == "SAR"
 
 
@@ -481,7 +483,7 @@ def test_unknown_unknown_incompatible_dimensions_rejects_with_dimension_mismatch
     """Scenario 5: Unknown + Unknown but incompatible dimensions -> INVALID with IMAGE_DIMENSION_MISMATCH, NOT UNKNOWN_MODALITY."""
     t1 = unknown_geotiff("T1", width=10980, height=10980, count=1, imagery_id="a")
     t2 = unknown_geotiff("T2", width=5120, height=5120, count=1, imagery_id="b")
-    result = validate_change_detection_inputs(t1, t2, REQS)
+    result = validate_change_detection_inputs(t1, t2, GATES_ON)
     assert result.valid is False
     assert result.status == "REJECT"
     assert len(result.errors) == 1
@@ -508,16 +510,6 @@ def test_same_multispectral_bands_b02_b03_b04_b08_is_valid():
     result = validate_change_detection_inputs(t1, t2, REQS)
     assert result.valid is True
     assert result.errors == []
-
-
-def test_sar_band_mismatch_vv_vh_message_format():
-    """Scenario 3: VV + VH -> INVALID with SAR band mismatch."""
-    result = validate_change_detection_inputs(sar_vv("T1", imagery_id="a"), sar_vh("T2", imagery_id="b"), REQS)
-    assert result.valid is False
-    assert result.errors[0].code == BAND_MISMATCH
-    assert result.errors[0].t1 == "VV"
-    assert result.errors[0].t2 == "VH"
-    assert "SAR band mismatch" in result.errors[0].message
 
 
 def test_different_crs_rejected_with_crs_mismatch():
