@@ -438,10 +438,17 @@ export function generateConversationTitle(conversationId: string) {
 }
 
 /** Deletes the conversation with its queries and uploaded files. */
-export function deleteConversation(conversationId: string) {
-  return request<{ id: string; status: string }>(`/conversations/${conversationId}`, {
-    method: "DELETE",
-  });
+export async function deleteConversation(conversationId: string) {
+  try {
+    return await request<{ id: string; status: string }>(`/conversations/${conversationId}`, {
+      method: "DELETE",
+    });
+  } catch (err: any) {
+    if (err?.status === 404 || err?.code === "CONVERSATION_NOT_FOUND" || err?.message?.includes("not found")) {
+      return { id: conversationId, status: "already_deleted" };
+    }
+    throw err;
+  }
 }
 
 export function getAnalysisJob(jobId: string) {

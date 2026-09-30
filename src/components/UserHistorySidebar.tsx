@@ -25,7 +25,9 @@ import {
   RefreshCw,
   Pencil,
   Trash2,
-  LogOut
+  LogOut,
+  X,
+  Loader2
 } from "lucide-react"
 
 import {
@@ -386,6 +388,9 @@ export function UserHistorySidebar({
   // configured) -- shown under the error so setup problems aren't a mystery.
   const [errorDetail, setErrorDetail] = React.useState<string | null>(null)
   const [openMenuKey, setOpenMenuKey] = React.useState<string | null>(null)
+  const [conversationToDelete, setConversationToDelete] = React.useState<Conversation | null>(null)
+  const [isDeleting, setIsDeleting] = React.useState(false)
+  const [deleteError, setDeleteError] = React.useState<string | null>(null)
   const { isMobile, setOpenMobile, setOpen } = useSidebar()
   const hasLoadedRef = React.useRef(false)
 
@@ -462,19 +467,45 @@ export function UserHistorySidebar({
     fetchHistory()
   }
 
-  const handleDelete = async (conversation: Conversation) => {
-    const ok = window.confirm(
-      `Delete "${conversation.title}"?\n\nThis permanently removes the conversation, its queries and its uploaded images.`
-    )
-    if (!ok) return
-    try {
-      await deleteConversation(conversation.id)
-      onConversationDeleted?.(conversation.id)
-    } catch (err) {
-      console.error("[SatQuery] Failed to delete conversation:", err)
-      window.alert(`Could not delete conversation: ${(err as Error).message || "unknown error"}`)
+  React.useEffect(() => {
+    if (!conversationToDelete) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isDeleting) {
+        setConversationToDelete(null)
+      }
     }
-    fetchHistory()
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [conversationToDelete, isDeleting])
+
+  const handleDelete = (conversation: Conversation) => {
+    setConversationToDelete(conversation)
+    setDeleteError(null)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!conversationToDelete) return
+    setIsDeleting(true)
+    setDeleteError(null)
+    const targetId = conversationToDelete.id
+    try {
+      await deleteConversation(targetId)
+      onConversationDeleted?.(targetId)
+      setEntries((prev) => prev.filter((e) => e.key !== `c-${targetId}`))
+      setConversationToDelete(null)
+    } catch (err: any) {
+      if (err?.status === 404 || err?.code === "CONVERSATION_NOT_FOUND" || err?.message?.includes("not found")) {
+        onConversationDeleted?.(targetId)
+        setEntries((prev) => prev.filter((e) => e.key !== `c-${targetId}`))
+        setConversationToDelete(null)
+      } else {
+        console.error("[SatQuery] Failed to delete conversation:", err)
+        setDeleteError(err?.message || "Failed to delete conversation. Please try again.")
+      }
+    } finally {
+      setIsDeleting(false)
+      fetchHistory()
+    }
   }
 
   // A conversation is highlighted on the landing screen too: New Chat opens a
@@ -493,7 +524,8 @@ export function UserHistorySidebar({
   }))
 
   return (
-    <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border select-none">
+    <>
+      <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border select-none">
       {/* Header: Brand, New Chat, and Sidebar Close Action */}
       <SidebarHeader className="p-3 pb-2 border-b border-sidebar-border/30">
         <div className="flex items-center justify-between gap-2">
@@ -830,5 +862,94 @@ export function UserHistorySidebar({
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
+
+    {/* Sleek Custom In-App Delete Confirmation Modal */}
+    {conversationToDelete && createPortal(
+      <div
+        className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in-0 duration-200"
+        onClick={(e) => {
+          if (e.target === e.currentTarget && !isDeleting) {
+            setConversationToDelete(null)
+          }
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-conv-title"
+      >
+        <div
+          className="relative w-full max-w-[440px] rounded-2xl border border-red-500/25 bg-[#0d131f] p-6 text-white shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),0_0_30px_rgba(239,68,68,0.12)] animate-in zoom-in-95 duration-200"
+        >
+          {/* Close button */}
+          <button
+            onClick={() => !isDeleting && setConversationToDelete(null)}
+            disabled={isDeleting}
+            className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50 cursor-pointer"
+            aria-label="Close dialog"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          {/* Header & Icon */}
+          <div className="flex items-start gap-3.5 mb-4">
+            <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-red-500/10 border border-red-500/25 text-red-400 shrink-0">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0 pr-6">
+              <h3 id="delete-conv-title" className="text-base font-semibold text-white tracking-tight">
+                Delete Conversation
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                This action cannot be undone.
+              </p>
+            </div>
+          </div>
+
+          {/* Dialog Description */}
+          <div className="text-sm text-slate-300 leading-relaxed mb-6 bg-slate-900/60 rounded-xl p-3.5 border border-slate-800/80">
+            Are you sure you want to delete <span className="font-semibold text-white">"{conversationToDelete.title}"</span>? All associated analysis queries, jobs, and uploaded imagery will be permanently removed.
+          </div>
+
+          {/* Error Message if deletion failed */}
+          {deleteError && (
+            <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-red-950/40 border border-red-500/30 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{deleteError}</span>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setConversationToDelete(null)}
+              disabled={isDeleting}
+              className="px-4 py-2 text-sm font-medium rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete Chat</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+  </>
   )
 }
