@@ -644,8 +644,14 @@ export function App() {
         console.log('[SatQuery] Projects loaded');
         const activeId = getActiveProjectId();
         if (activeId) {
-          const proj = await getProject(activeId).catch(() => null);
-          if (proj) setActiveProject(proj);
+          const exists = projList.some((p) => p.id === activeId);
+          if (exists) {
+            const proj = await getProject(activeId).catch(() => null);
+            if (proj) setActiveProject(proj);
+            else setActiveProjectId(null);
+          } else {
+            setActiveProjectId(null);
+          }
         }
       } catch (err) {
         console.warn('[SatQuery] Projects load warning:', err);
