@@ -55,17 +55,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_regex(self) -> str | None:
-        """Development only: also allow a local frontend on ANY port.
-
-        `npm run dev` silently moves to 5174, 5175, ... when 5173 is taken, and
-        a browser origin missing from CORS_ORIGINS gets every API call blocked
-        at the preflight (400 "Disallowed CORS origin") -- which the sidebar
-        can only report as "Unable to load conversation history." Production
-        keeps the explicit CORS_ORIGINS list only.
-        """
+        """Allow local frontends on any port and any Vercel deployment (*.vercel.app)."""
+        patterns = [r"^https://.*\.vercel\.app$"]
         if self.APP_ENV == "development":
-            return r"^http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
-        return None
+            patterns.append(r"^http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
+        return "|".join(patterns)
 
     @property
     def max_upload_size_bytes(self) -> int:

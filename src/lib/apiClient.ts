@@ -6,8 +6,10 @@
  * returns or fabricates an analysis answer.
  */
 
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) || "http://localhost:8000/api/v1";
+const rawBaseUrl =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "http://localhost:8000/api/v1";
+const cleanBaseUrl = rawBaseUrl.replace(/\/+$/, "");
+const API_BASE_URL = cleanBaseUrl.endsWith("/api/v1") ? cleanBaseUrl : `${cleanBaseUrl}/api/v1`;
 
 export interface ApiError {
   code: string;
