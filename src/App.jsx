@@ -11,6 +11,7 @@ import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ReportScreen } from './components/ReportScreen';
 import { ProfileDashboard } from './components/ProfileDashboard';
 import { SettingsPage } from './components/SettingsPage';
+import { UpgradePlanScreen } from './components/UpgradePlanScreen';
 import { ModelAttachmentScreen } from './components/ModelAttachmentScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
 import { LibraryScreen } from './components/LibraryScreen';
@@ -52,7 +53,7 @@ const LAST_IMAGERY_KEY = 'satquery-last-imagery-id';
 const LAST_CONVERSATION_KEY = 'satquery-last-conversation-id';
 // Set only while the profile or settings screen is open, so a refresh reopens it.
 const LAST_SCREEN_KEY = 'satquery-last-screen';
-const RESTORABLE_SCREENS = ['profile', 'settings', 'library'];
+const RESTORABLE_SCREENS = ['profile', 'settings', 'library', 'upgrade-plan'];
 // Cached copies of the SAVED theme / sidebar density (GET /settings is the
 // source of truth), only so the first frame paints right before it answers.
 const THEME_KEY = 'satquery-theme';
@@ -1167,6 +1168,10 @@ export function App() {
                 onSave={saveSettings}
                 onProfileSaved={handleProfileSaved}
               />
+            )}
+
+            {activeScreen === 'upgrade-plan' && (
+              <UpgradePlanScreen currentPlan={profileUser?.plan ?? null} />
             )}
 
             {activeScreen === 'viewer' && (

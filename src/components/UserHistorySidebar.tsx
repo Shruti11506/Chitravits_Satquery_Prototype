@@ -46,6 +46,7 @@ import {
   useSidebar
 } from "@/components/ui/sidebar"
 import { ChitravitsEmblem } from "./ui/ChitravitsLogo"
+import { cn } from "@/lib/utils"
 import {
   deleteConversation,
   deleteLegacyChat,
@@ -835,17 +836,22 @@ export function UserHistorySidebar({
                     {
                       label: "Upgrade Plan",
                       icon: <Sparkles className="h-[16px] w-[16px] text-blue-400" />,
+                      active: activeScreen === "upgrade-plan",
                       onSelect: () => {
-                        onNavigateScreen("report")
+                        onNavigateScreen("upgrade-plan")
                         dismissSidebar()
                       }
                     }
-                  ].map(({ label, icon, onSelect }) => (
+                  ].map(({ label, icon, active, onSelect }) => (
                     <button
                       key={label}
                       role="menuitem"
+                      aria-current={active ? "page" : undefined}
                       style={{ padding: "0 8px" }}
-                      className="flex h-[44px] w-full shrink-0 items-center gap-[11px] rounded-md text-left text-[14px] leading-[20px] text-[#e5e7eb] transition-colors duration-150 hover:bg-[rgba(255,255,255,0.04)] focus-visible:bg-[rgba(255,255,255,0.04)] focus-visible:outline-none"
+                      className={cn(
+                        "flex h-[44px] w-full shrink-0 items-center gap-[11px] rounded-md text-left text-[14px] leading-[20px] text-[#e5e7eb] transition-colors duration-150 hover:bg-[rgba(255,255,255,0.04)] focus-visible:bg-[rgba(255,255,255,0.04)] focus-visible:outline-none",
+                        active && "bg-[rgba(59,130,246,0.14)] text-[#93c5fd] hover:bg-[rgba(59,130,246,0.18)]"
+                      )}
                       onClick={() => {
                         setIsProfileMenuOpen(false)
                         onSelect()

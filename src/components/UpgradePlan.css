@@ -1,0 +1,452 @@
+/* ==========================================================================
+   Upgrade Plan screen (UpgradePlanScreen.jsx) -- scoped .up-* classes on top
+   of the .pf-page / .pf-card base and --pf-* tokens from ProfileDashboard.css.
+   ========================================================================== */
+[data-theme="dark"] {
+  --up-blue: #3b82f6;
+  --up-blue-text: #60a5fa;
+  --up-blue-soft: rgba(59, 130, 246, 0.12);
+  --up-blue-glow: 0 0 0 1px rgba(59, 130, 246, 0.35), 0 12px 40px rgba(37, 99, 235, 0.22);
+  --up-purple: #7c3aed;
+  --up-purple-text: #a78bfa;
+  --up-purple-soft: rgba(139, 92, 246, 0.12);
+  --up-card: rgba(6, 12, 24, 0.82);
+  --up-card-pro: linear-gradient(180deg, rgba(17, 37, 82, 0.9), rgba(6, 12, 24, 0.92));
+  --up-card-team: linear-gradient(180deg, rgba(36, 22, 74, 0.55), rgba(6, 12, 24, 0.9));
+  --up-muted: #94a3b8;
+  --up-row-line: rgba(148, 163, 184, 0.1);
+  --up-head-row: rgba(15, 23, 42, 0.7);
+  --up-current-bg: rgba(30, 41, 59, 0.7);
+  --up-current-text: #94a3b8;
+}
+[data-theme="light"] {
+  --up-blue: #2563eb;
+  --up-blue-text: #1d4ed8;
+  --up-blue-soft: rgba(37, 99, 235, 0.08);
+  --up-blue-glow: 0 0 0 1px rgba(37, 99, 235, 0.35), 0 12px 32px rgba(37, 99, 235, 0.14);
+  --up-purple: #6d28d9;
+  --up-purple-text: #6d28d9;
+  --up-purple-soft: rgba(109, 40, 217, 0.07);
+  --up-card: #ffffff;
+  --up-card-pro: linear-gradient(180deg, #eff6ff, #ffffff);
+  --up-card-team: linear-gradient(180deg, #f5f3ff, #ffffff);
+  --up-muted: #475569;
+  --up-row-line: #e2e8f0;
+  --up-head-row: #f1f5f9;
+  --up-current-bg: #e2e8f0;
+  --up-current-text: #64748b;
+}
+
+.up-page {
+  gap: 22px;
+  padding-top: 28px;
+}
+
+/* ---- Header ---- */
+.up-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+}
+.up-head-text { min-width: 0; }
+.up-title {
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+.up-subtitle {
+  margin-top: 10px;
+  font-size: 1.08rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.up-support-text {
+  margin-top: 6px;
+  font-size: 0.92rem;
+  color: var(--up-muted);
+  max-width: 620px;
+}
+.up-head-art {
+  width: 360px;
+  max-width: 40%;
+  height: auto;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* ---- Billing toggle ---- */
+.up-toggle-row { display: flex; justify-content: center; }
+.up-toggle {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 120px 184px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--pf-line);
+  background: var(--up-card);
+}
+.up-toggle-thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: 120px;
+  border-radius: 999px;
+  background: var(--up-blue);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.35);
+  transition: transform 220ms ease, width 220ms ease;
+}
+.up-toggle-thumb.is-yearly {
+  transform: translateX(120px);
+  width: 184px;
+}
+.up-toggle-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--up-muted);
+  transition: color 200ms ease;
+  cursor: pointer;
+}
+.up-toggle-btn.is-active { color: #fff; }
+.up-save-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.up-toggle-btn.is-active .up-save-badge {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ---- Pricing cards ---- */
+.up-plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  align-items: stretch;
+}
+.up-plan {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid var(--pf-line);
+  background: var(--up-card);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+.up-plan:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  border-color: rgba(96, 165, 250, 0.4);
+}
+.up-plan-blue {
+  background: var(--up-card-pro);
+  border-color: var(--up-blue);
+  box-shadow: var(--up-blue-glow);
+}
+.up-plan-blue:hover {
+  border-color: var(--up-blue);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.5), 0 18px 46px rgba(37, 99, 235, 0.3);
+}
+.up-plan-purple {
+  background: var(--up-card-team);
+  border-color: rgba(139, 92, 246, 0.35);
+}
+.up-plan-purple:hover {
+  border-color: rgba(139, 92, 246, 0.65);
+  box-shadow: 0 14px 34px rgba(76, 29, 149, 0.25);
+}
+
+.up-plan-badge {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--up-blue-text);
+  background: var(--up-blue-soft);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+}
+.up-plan-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+/* Room for the "Most Popular" badge beside the name only, so the description
+   keeps the card's full width. */
+.up-plan-blue .up-plan-name { padding-right: 112px; }
+.up-plan { container-type: inline-size; }
+/* A narrow card (e.g. tablet with the sidebar open) has no room beside the
+   name: put the badge above the heading instead. */
+@container (max-width: 300px) {
+  .up-plan-badge { position: static; align-self: flex-start; margin-bottom: 12px; }
+  .up-plan-blue .up-plan-name { padding-right: 0; }
+}
+.up-plan-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-primary);
+  background: var(--up-current-bg);
+  border: 1px solid var(--pf-line);
+}
+.up-plan-blue .up-plan-icon {
+  color: #fff;
+  background: radial-gradient(circle at 30% 25%, #3b82f6, #1e3a8a 80%);
+  border-color: rgba(96, 165, 250, 0.6);
+}
+.up-plan-purple .up-plan-icon {
+  color: #fff;
+  background: radial-gradient(circle at 30% 25%, #8b5cf6, #3b0764 85%);
+  border-color: rgba(167, 139, 250, 0.55);
+}
+.up-plan-heading { min-width: 0; }
+.up-plan-name { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
+.up-plan-desc { margin-top: 3px; font-size: 0.86rem; color: var(--up-muted); }
+
+.up-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 22px;
+}
+.up-price-value {
+  font-size: 2.3rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.up-price-unit { font-size: 1rem; color: var(--up-muted); }
+.up-price-note {
+  min-height: 18px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--up-muted);
+}
+
+.up-plan-btn {
+  width: 100%;
+  height: 44px;
+  margin-top: 14px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 0.94rem;
+  font-weight: 600;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+.up-plan-btn-current {
+  color: var(--up-current-text);
+  background: var(--up-current-bg);
+  border: 1px solid var(--pf-line);
+  cursor: not-allowed;
+}
+.up-plan-btn-cta {
+  color: #fff;
+  background: var(--up-blue);
+  cursor: pointer;
+}
+.up-plan-btn-cta:hover {
+  background: #2563eb;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+}
+.up-plan-btn-cta:active { transform: scale(0.98); }
+.up-plan-btn-cta:focus-visible { outline: 2px solid var(--up-blue-text); outline-offset: 2px; }
+.up-plan-purple .up-plan-btn-cta { background: var(--up-purple); }
+.up-plan-purple .up-plan-btn-cta:hover {
+  background: #6d28d9;
+  box-shadow: 0 6px 20px rgba(109, 40, 217, 0.4);
+}
+.up-plan-purple .up-plan-btn-cta:focus-visible { outline-color: var(--up-purple-text); }
+
+.up-plan-features {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 22px;
+  font-size: 0.9rem;
+}
+.up-plan-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.up-feature-check {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--up-muted);
+  border: 1px solid var(--pf-line);
+}
+.up-plan-blue .up-feature-check { color: #fff; background: var(--up-blue); border-color: var(--up-blue); }
+.up-plan-purple .up-feature-check { color: #fff; background: var(--up-purple); border-color: var(--up-purple); }
+
+/* ---- Feature comparison ---- */
+.up-compare { padding: 22px 22px 14px; }
+.up-compare-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.up-section-title { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+.up-section-sub { margin-top: 3px; font-size: 0.86rem; color: var(--up-muted); }
+.up-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--up-blue-text);
+  cursor: pointer;
+}
+.up-link:hover { text-decoration: underline; }
+
+.up-table-scroll {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+.up-table { min-width: 560px; }
+.up-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(90px, 1fr));
+  align-items: center;
+  min-height: 44px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--up-row-line);
+}
+.up-row:last-child { border-bottom: none; }
+.up-row > span { padding: 0 12px; }
+.up-row-head {
+  min-height: 40px;
+  border-radius: 10px 10px 0 0;
+  background: var(--up-head-row);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.up-col {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.up-col-pro { background: var(--up-blue-soft); }
+.up-feature-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.up-feature-icon { flex-shrink: 0; color: var(--up-muted); }
+.up-cmp-dash { color: var(--up-muted); opacity: 0.7; }
+.up-accent-blue { color: var(--up-blue-text); }
+.up-accent-purple { color: var(--up-purple-text); }
+.up-accent-neutral { color: var(--text-primary); }
+
+/* ---- Support ---- */
+.up-help {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+}
+.up-help-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--up-blue-text);
+  background: var(--up-blue-soft);
+  border: 1px solid var(--pf-line);
+}
+.up-help-text { flex: 1; min-width: 0; }
+.up-help-title { font-size: 1rem; font-weight: 600; }
+.up-help-sub { margin-top: 2px; font-size: 0.85rem; color: var(--up-muted); }
+.up-help-actions { display: flex; gap: 12px; flex-shrink: 0; }
+.up-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  border: 1px solid var(--pf-line);
+  background: transparent;
+  transition: background 150ms ease, border-color 150ms ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.up-ghost-btn:hover {
+  background: var(--up-blue-soft);
+  border-color: rgba(96, 165, 250, 0.45);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 1100px) {
+  .up-plans { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .up-plans > .up-plan:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .up-head-art { display: none; }
+  .up-help { flex-wrap: wrap; }
+  .up-help-actions { width: 100%; }
+  .up-ghost-btn { flex: 1; }
+}
+@media (max-width: 680px) {
+  .up-page { padding: 20px 16px 40px; }
+  .up-plans { grid-template-columns: minmax(0, 1fr); }
+  .up-plan { padding: 20px; }
+  .up-toggle { grid-template-columns: 104px 172px; }
+  .up-toggle-thumb { width: 104px; }
+  .up-toggle-thumb.is-yearly { transform: translateX(104px); width: 172px; }
+  .up-help-actions { flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .up-plan, .up-toggle-thumb, .up-toggle-btn, .up-plan-btn { transition: none; }
+  .up-plan:hover { transform: none; }
+}
