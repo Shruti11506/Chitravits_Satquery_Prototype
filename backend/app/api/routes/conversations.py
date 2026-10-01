@@ -84,3 +84,13 @@ def generate_title(conversation_id: UUID) -> ApiResponse[ConversationOut]:
 def delete_conversation(conversation_id: UUID) -> ApiResponse[ConversationDeleteResponse]:
     conversation_service.delete_conversation(str(conversation_id))
     return ApiResponse.ok(ConversationDeleteResponse(id=conversation_id))
+
+
+@router.delete(
+    "/legacy/{imagery_id}",
+    response_model=ApiResponse[ConversationDeleteResponse],
+    summary="Delete a legacy (pre-conversation) chat: its queries, results and unused images",
+)
+def delete_legacy_chat(imagery_id: UUID) -> ApiResponse[ConversationDeleteResponse]:
+    conversation_service.delete_legacy_chat(str(imagery_id))
+    return ApiResponse.ok(ConversationDeleteResponse(id=imagery_id))

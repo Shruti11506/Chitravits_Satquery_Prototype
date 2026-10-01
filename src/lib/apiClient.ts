@@ -451,6 +451,18 @@ export async function deleteConversation(conversationId: string) {
   }
 }
 
+/** Deletes a legacy (pre-conversation) chat: its queries, results and unused images. */
+export async function deleteLegacyChat(imageryId: string) {
+  try {
+    return await request<{ id: string }>(`/conversations/legacy/${imageryId}`, { method: "DELETE" });
+  } catch (err: any) {
+    if (err?.status === 404 || err?.code === "CHAT_NOT_FOUND") {
+      return { id: imageryId, status: "already_deleted" };
+    }
+    throw err;
+  }
+}
+
 export function getAnalysisJob(jobId: string) {
   return request<{
     id: string;

@@ -957,6 +957,17 @@ export function App() {
     }
   };
 
+  const handleLegacyChatDeleted = (imageryId) => {
+    let openImageryId = null;
+    try { openImageryId = localStorage.getItem(LAST_IMAGERY_KEY); } catch {}
+    if (!activeConversationRef.current && openImageryId === imageryId) {
+      rememberPointer(LAST_IMAGERY_KEY, null);
+      setWorkspaceScenario(null);
+      setHistoryStack([]);
+      setActiveScreen('landing');
+    }
+  };
+
   // Legacy sidebar item (pre-conversation history) -> reload the real imagery
   // + its real query/ack messages from the backend. Never fabricates a chat.
   const handleSelectHistoryItem = async (historyItem) => {
@@ -1023,6 +1034,7 @@ export function App() {
         onSelectHistoryItem={handleSelectHistoryItem}
         onConversationRenamed={handleConversationRenamed}
         onConversationDeleted={handleConversationDeleted}
+        onLegacyChatDeleted={handleLegacyChatDeleted}
         onNavigateScreen={(screenId) => {
           // The sidebar Projects shortcut should always show the full list,
           // never jump into a specific project workspace.

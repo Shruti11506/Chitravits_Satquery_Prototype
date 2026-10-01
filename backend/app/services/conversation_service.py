@@ -240,21 +240,41 @@ def generate_title(conversation_id: str) -> dict:
     return conversation
 
 
+def _delete_jobs(job_ids: list[str]) -> None:
+    """Delete analysis jobs together with their results and evidence.
+
+    Order matters because of foreign keys: evidence -> analysis_results ->
+    analysis_jobs. A completed job has an analysis_results row, so deleting the
+    job first fails with an FK violation ("Failed to delete conversation
+    queries.").
+    """
+    if not job_ids:
+        return
+    client = get_supabase()
+    try:
+        results = client.table("analysis_results").select("id").in_("job_id", job_ids).execute()
+        result_ids = [r["id"] for r in results.data or []]
+        if result_ids:
+            client.table("evidence").delete().in_("result_id", result_ids).execute()
+            client.table("analysis_results").delete().in_("id", result_ids).execute()
+        client.table("analysis_jobs").delete().in_("id", job_ids).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to delete analysis_jobs %s", job_ids)
+        raise SupabaseError("Failed to delete conversation queries.") from exc
+
+
 def delete_conversation(conversation_id: str) -> None:
     """Delete the conversation with its queries and uploads (rows + Storage files).
 
-    Order matters because of foreign keys: analysis_jobs -> imagery, so jobs
-    go first, then each imagery (DB row, then Storage object -- see
-    imagery_service.delete_imagery), then the conversation itself.
+    Order matters because of foreign keys: jobs (with their results, see
+    _delete_jobs) go first because analysis_jobs -> imagery, then each imagery
+    (DB row, then Storage object -- see imagery_service.delete_imagery), then
+    the conversation itself.
     """
     get_conversation(conversation_id)
     client = get_supabase()
 
-    try:
-        client.table("analysis_jobs").delete().eq("conversation_id", conversation_id).execute()
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to delete analysis_jobs of conversation %s", conversation_id)
-        raise SupabaseError("Failed to delete conversation queries.") from exc
+    _delete_jobs([row["id"] for row in _select_for_conversation("analysis_jobs", conversation_id)])
 
     for row in _select_for_conversation("imagery", conversation_id):
         imagery_service.delete_imagery(row["id"])
@@ -264,3 +284,45 @@ def delete_conversation(conversation_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("Supabase delete failed for conversation %s", conversation_id)
         raise SupabaseError("Failed to delete conversation.") from exc
+
+
+def _select_jobs_using_imagery(imagery_id: str) -> list[dict]:
+    client = get_supabase()
+    try:
+        primary = client.table("analysis_jobs").select("*").eq("imagery_id", imagery_id).execute()
+        comparison = (
+            client.table("analysis_jobs").select("*").eq("comparison_imagery_id", imagery_id).execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Supabase list failed for analysis_jobs of imagery %s", imagery_id)
+        raise SupabaseError("Failed to load imagery queries.") from exc
+    return (primary.data or []) + (comparison.data or [])
+
+
+def delete_legacy_chat(imagery_id: str) -> None:
+    """Delete a legacy chat: the queries made against one image before
+    conversations existed (analysis_jobs with conversation_id NULL), their
+    results, and the image(s) they used once nothing else references them.
+    """
+    jobs = [
+        job
+        for job in _select_jobs_using_imagery(imagery_id)
+        if job.get("imagery_id") == imagery_id and not job.get("conversation_id")
+    ]
+    if not jobs:
+        raise NotFoundError("CHAT_NOT_FOUND", "Chat not found.")
+
+    used_imagery = {imagery_id} | {j["comparison_imagery_id"] for j in jobs if j.get("comparison_imagery_id")}
+    _delete_jobs([job["id"] for job in jobs])
+
+    for image_id in used_imagery:
+        # Keep an image another query (or a conversation) still uses.
+        if _select_jobs_using_imagery(image_id):
+            continue
+        try:
+            image = imagery_service.get_imagery(image_id)
+        except NotFoundError:
+            continue
+        if image.get("conversation_id"):
+            continue
+        imagery_service.delete_imagery(image_id)

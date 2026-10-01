@@ -48,6 +48,7 @@ import {
 import { ChitravitsEmblem } from "./ui/ChitravitsLogo"
 import {
   deleteConversation,
+  deleteLegacyChat,
   getAnalysisHistory,
   listConversations,
   renameConversation,
@@ -62,6 +63,7 @@ interface UserHistorySidebarProps {
   onSelectHistoryItem: (item: ApiHistoryItem) => void
   onConversationRenamed?: (conversation: Conversation) => void
   onConversationDeleted?: (conversationId: string) => void
+  onLegacyChatDeleted?: (imageryId: string) => void
   onNavigateScreen: (screenId: string) => void
   activeScreen: string
   activeConversationId?: string | null
@@ -183,7 +185,7 @@ interface ConversationRowProps {
   onOpenMenu: (key: string | null) => void
   onSelect: (entry: SidebarEntry) => void
   onRename: (conversation: Conversation, title: string) => Promise<void>
-  onDelete: (conversation: Conversation) => Promise<void>
+  onDelete: (entry: SidebarEntry) => void
 }
 
 function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete }: ConversationRowProps) {
@@ -301,51 +303,52 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
           <span className="truncate">{entry.title}</span>
         </SidebarMenuButton>
 
-        {entry.kind === "conversation" && (
-          <button
-            ref={triggerRef}
-            data-state={isMenuOpen ? "open" : "closed"}
-            onClick={(e) => {
-              e.stopPropagation()
-              onOpenMenu(isMenuOpen ? null : entry.key)
-            }}
-            title="More options"
-            aria-label="Conversation options"
-            className="shrink-0 p-1 rounded-md opacity-0 group-hover/row:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-100 cursor-pointer"
-          >
-            <MoreHorizontal className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <button
+          ref={triggerRef}
+          data-state={isMenuOpen ? "open" : "closed"}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenMenu(isMenuOpen ? null : entry.key)
+          }}
+          title="More options"
+          aria-label="Conversation options"
+          className="shrink-0 p-1 rounded-md opacity-0 group-hover/row:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-100 cursor-pointer"
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
 
       </div>
 
 
-      {/* Portaled ··· dropdown: Rename + Delete */}
-      {entry.kind === "conversation" && isMenuOpen && createPortal(
+      {/* Portaled ··· dropdown: Rename (conversations only -- a legacy chat has
+          no record to rename) + Delete */}
+      {isMenuOpen && createPortal(
         <div
           ref={menuRef}
           role="menu"
           style={menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 0, left: 0, visibility: "hidden" }}
           className="fixed z-[200] flex w-[200px] flex-col gap-1 rounded-[11px] border border-[rgba(148,163,184,0.28)] bg-[hsl(var(--sidebar-background))] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.45),0_0_0_1px_rgba(59,130,246,0.05)] animate-in fade-in-0 zoom-in-95 duration-150 transition-none"
         >
-          <button
-            role="menuitem"
-            className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
-            onClick={() => {
-              onOpenMenu(null)
-              setDraft(entry.title)
-              setIsEditing(true)
-            }}
-          >
-            <Pencil className="w-4 h-4 text-[hsl(var(--sidebar-foreground)/0.7)]" />
-            <span>Rename</span>
-          </button>
+          {entry.kind === "conversation" && (
+            <button
+              role="menuitem"
+              className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
+              onClick={() => {
+                onOpenMenu(null)
+                setDraft(entry.title)
+                setIsEditing(true)
+              }}
+            >
+              <Pencil className="w-4 h-4 text-[hsl(var(--sidebar-foreground)/0.7)]" />
+              <span>Rename</span>
+            </button>
+          )}
           <button
             role="menuitem"
             className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-red-400/90 transition-colors duration-100 hover:bg-red-500/10 hover:text-red-400"
             onClick={() => {
               onOpenMenu(null)
-              onDelete(entry.conversation)
+              onDelete(entry)
             }}
           >
             <Trash2 className="w-4 h-4" />
@@ -365,6 +368,7 @@ export function UserHistorySidebar({
   onSelectHistoryItem,
   onConversationRenamed,
   onConversationDeleted,
+  onLegacyChatDeleted,
   onNavigateScreen,
   activeScreen,
   activeConversationId,
@@ -388,7 +392,7 @@ export function UserHistorySidebar({
   // configured) -- shown under the error so setup problems aren't a mystery.
   const [errorDetail, setErrorDetail] = React.useState<string | null>(null)
   const [openMenuKey, setOpenMenuKey] = React.useState<string | null>(null)
-  const [conversationToDelete, setConversationToDelete] = React.useState<Conversation | null>(null)
+  const [entryToDelete, setEntryToDelete] = React.useState<SidebarEntry | null>(null)
   const [isDeleting, setIsDeleting] = React.useState(false)
   const [deleteError, setDeleteError] = React.useState<string | null>(null)
   const { isMobile, setOpenMobile, setOpen } = useSidebar()
@@ -468,36 +472,39 @@ export function UserHistorySidebar({
   }
 
   React.useEffect(() => {
-    if (!conversationToDelete) return
+    if (!entryToDelete) return
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !isDeleting) {
-        setConversationToDelete(null)
+        setEntryToDelete(null)
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [conversationToDelete, isDeleting])
+  }, [entryToDelete, isDeleting])
 
-  const handleDelete = (conversation: Conversation) => {
-    setConversationToDelete(conversation)
+  const handleDelete = (entry: SidebarEntry) => {
+    setEntryToDelete(entry)
     setDeleteError(null)
   }
 
   const handleConfirmDelete = async () => {
-    if (!conversationToDelete) return
+    if (!entryToDelete) return
     setIsDeleting(true)
     setDeleteError(null)
-    const targetId = conversationToDelete.id
+    const target = entryToDelete
+    const notifyDeleted = () => {
+      if (target.kind === "conversation") onConversationDeleted?.(target.conversation.id)
+      else onLegacyChatDeleted?.(target.item.imagery_id)
+      setEntries((prev) => prev.filter((e) => e.key !== target.key))
+      setEntryToDelete(null)
+    }
     try {
-      await deleteConversation(targetId)
-      onConversationDeleted?.(targetId)
-      setEntries((prev) => prev.filter((e) => e.key !== `c-${targetId}`))
-      setConversationToDelete(null)
+      if (target.kind === "conversation") await deleteConversation(target.conversation.id)
+      else await deleteLegacyChat(target.item.imagery_id)
+      notifyDeleted()
     } catch (err: any) {
       if (err?.status === 404 || err?.code === "CONVERSATION_NOT_FOUND" || err?.message?.includes("not found")) {
-        onConversationDeleted?.(targetId)
-        setEntries((prev) => prev.filter((e) => e.key !== `c-${targetId}`))
-        setConversationToDelete(null)
+        notifyDeleted()
       } else {
         console.error("[SatQuery] Failed to delete conversation:", err)
         setDeleteError(err?.message || "Failed to delete conversation. Please try again.")
@@ -864,12 +871,12 @@ export function UserHistorySidebar({
     </Sidebar>
 
     {/* Sleek Custom In-App Delete Confirmation Modal */}
-    {conversationToDelete && createPortal(
+    {entryToDelete && createPortal(
       <div
         className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in-0 duration-200"
         onClick={(e) => {
           if (e.target === e.currentTarget && !isDeleting) {
-            setConversationToDelete(null)
+            setEntryToDelete(null)
           }
         }}
         role="dialog"
@@ -881,7 +888,7 @@ export function UserHistorySidebar({
         >
           {/* Close button */}
           <button
-            onClick={() => !isDeleting && setConversationToDelete(null)}
+            onClick={() => !isDeleting && setEntryToDelete(null)}
             disabled={isDeleting}
             className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50 cursor-pointer"
             aria-label="Close dialog"
@@ -906,7 +913,7 @@ export function UserHistorySidebar({
 
           {/* Dialog Description */}
           <div className="text-sm text-slate-300 leading-relaxed mb-6 bg-slate-900/60 rounded-xl px-4 py-4 border border-slate-800/80">
-            Are you sure you want to delete <span className="font-semibold text-white break-words">"{conversationToDelete.title}"</span>? All associated analysis queries, jobs, and uploaded imagery will be permanently removed.
+            Are you sure you want to delete <span className="font-semibold text-white break-words">"{entryToDelete.title}"</span>? All associated analysis queries, jobs, and uploaded imagery will be permanently removed.
           </div>
 
           {/* Error Message if deletion failed */}
@@ -921,7 +928,7 @@ export function UserHistorySidebar({
           <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
             <button
               type="button"
-              onClick={() => setConversationToDelete(null)}
+              onClick={() => setEntryToDelete(null)}
               disabled={isDeleting}
               className="shrink-0 px-5 py-2.5 text-sm font-medium rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors disabled:opacity-50 cursor-pointer"
             >

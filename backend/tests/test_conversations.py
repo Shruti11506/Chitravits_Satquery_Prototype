@@ -245,6 +245,69 @@ def test_delete_conversation_removes_queries_uploads_and_files(client, fake_supa
     assert all(k.startswith(kept_folder + "/") for k in fake_supabase.storage.objects)
 
 
+def _add_result(fake_supabase, job_id):
+    """A completed job's result + evidence, as the model worker writes them."""
+    result_id = f"r-{job_id}"
+    fake_supabase.store.setdefault("analysis_results", []).append(
+        {"id": result_id, "job_id": job_id, "analysis_type": "vqa"}
+    )
+    fake_supabase.store.setdefault("evidence", []).append(
+        {"id": f"e-{job_id}", "result_id": result_id, "evidence_type": "bbox"}
+    )
+
+
+def test_delete_conversation_removes_results_and_evidence_of_completed_jobs(client, fake_supabase):
+    cid = _new_conversation(client)["id"]
+    imagery_id = _upload(client, cid).json()["data"]["id"]
+    job_id = _ask(client, cid, imagery_id, "Highlight water bodies").json()["data"]["job_id"]
+    _add_result(fake_supabase, job_id)
+
+    other = _new_conversation(client)["id"]
+    other_imagery = _upload(client, other, filename="keep.tif").json()["data"]["id"]
+    other_job = _ask(client, other, other_imagery, "Analyze vegetation").json()["data"]["job_id"]
+    _add_result(fake_supabase, other_job)
+
+    assert client.delete(f"/api/v1/conversations/{cid}").status_code == 200
+
+    assert [r["job_id"] for r in fake_supabase.store["analysis_results"]] == [other_job]
+    assert [e["result_id"] for e in fake_supabase.store["evidence"]] == [f"r-{other_job}"]
+
+
+def _legacy_chat(client, name="legacy"):
+    imagery_id = client.post("/api/v1/imagery", json={"name": name}).json()["data"]["id"]
+    job = client.post(
+        "/api/v1/analysis",
+        json={"imagery_id": imagery_id, "analysis_type": "vqa", "query": "Old style"},
+    ).json()["data"]
+    return imagery_id, job["job_id"]
+
+
+def test_delete_legacy_chat_removes_its_queries_results_and_image(client, fake_supabase):
+    imagery_id, job_id = _legacy_chat(client)
+    _add_result(fake_supabase, job_id)
+    kept_imagery, kept_job = _legacy_chat(client, name="keep")
+
+    response = client.delete(f"/api/v1/conversations/legacy/{imagery_id}")
+    assert response.status_code == 200
+
+    assert [j["id"] for j in fake_supabase.store["analysis_jobs"]] == [kept_job]
+    assert [i["id"] for i in fake_supabase.store["imagery"]] == [kept_imagery]
+    assert fake_supabase.store["analysis_results"] == []
+    assert fake_supabase.store["evidence"] == []
+
+
+def test_delete_legacy_chat_ignores_conversation_queries(client, fake_supabase):
+    cid = _new_conversation(client)["id"]
+    imagery_id = _upload(client, cid).json()["data"]["id"]
+    _ask(client, cid, imagery_id, "Highlight water bodies")
+
+    response = client.delete(f"/api/v1/conversations/legacy/{imagery_id}")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "CHAT_NOT_FOUND"
+    assert len(fake_supabase.store["analysis_jobs"]) == 1
+    assert len(fake_supabase.store["imagery"]) == 1
+
+
 def test_legacy_requests_without_conversation_still_work(client):
     imagery_id = client.post("/api/v1/imagery", json={"name": "legacy"}).json()["data"]["id"]
     response = client.post(
