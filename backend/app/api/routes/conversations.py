@@ -86,6 +86,16 @@ def delete_conversation(conversation_id: UUID) -> ApiResponse[ConversationDelete
     return ApiResponse.ok(ConversationDeleteResponse(id=conversation_id))
 
 
+@router.patch(
+    "/legacy/{imagery_id}",
+    response_model=ApiResponse[ConversationOut],
+    summary="Rename a legacy (pre-conversation) chat; it becomes a real conversation",
+)
+def rename_legacy_chat(imagery_id: UUID, payload: ConversationRename) -> ApiResponse[ConversationOut]:
+    row = conversation_service.rename_legacy_chat(str(imagery_id), payload.title)
+    return ApiResponse.ok(ConversationOut(**row))
+
+
 @router.delete(
     "/legacy/{imagery_id}",
     response_model=ApiResponse[ConversationDeleteResponse],

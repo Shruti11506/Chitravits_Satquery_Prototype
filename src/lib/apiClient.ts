@@ -428,6 +428,14 @@ export function renameConversation(conversationId: string, title: string) {
   });
 }
 
+/** Renames a legacy (pre-conversation) chat; the backend turns it into a real conversation. */
+export function renameLegacyChat(imageryId: string, title: string) {
+  return request<Conversation>(`/conversations/legacy/${imageryId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
 /**
  * generateConversationTitle: asks the backend to title the conversation from
  * its first meaningful stored query. Runs at most once per conversation

@@ -296,6 +296,33 @@ def test_delete_legacy_chat_removes_its_queries_results_and_image(client, fake_s
     assert fake_supabase.store["evidence"] == []
 
 
+def test_rename_legacy_chat_turns_it_into_a_conversation(client, fake_supabase):
+    imagery_id, job_id = _legacy_chat(client)
+    other_imagery, other_job = _legacy_chat(client, name="other")
+
+    response = client.patch(f"/api/v1/conversations/legacy/{imagery_id}", json={"title": "  My  scene "})
+    assert response.status_code == 200
+    conversation = response.json()["data"]
+    assert conversation["title"] == "My scene"
+    assert conversation["title_source"] == "user"
+
+    jobs = {j["id"]: j.get("conversation_id") for j in fake_supabase.store["analysis_jobs"]}
+    assert jobs == {job_id: conversation["id"], other_job: None}
+    images = {i["id"]: i.get("conversation_id") for i in fake_supabase.store["imagery"]}
+    assert images == {imagery_id: conversation["id"], other_imagery: None}
+    # It is now an ordinary conversation, listed with its new title.
+    listed = client.get("/api/v1/conversations").json()["data"]
+    assert [c["title"] for c in listed] == ["My scene"]
+
+
+def test_rename_legacy_chat_rejects_blank_title(client, fake_supabase):
+    imagery_id, _ = _legacy_chat(client)
+    response = client.patch(f"/api/v1/conversations/legacy/{imagery_id}", json={"title": "   "})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_TITLE"
+    assert fake_supabase.store.get("conversations", []) == []
+
+
 def test_delete_legacy_chat_ignores_conversation_queries(client, fake_supabase):
     cid = _new_conversation(client)["id"]
     imagery_id = _upload(client, cid).json()["data"]["id"]

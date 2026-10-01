@@ -968,6 +968,16 @@ export function App() {
     }
   };
 
+  // Renaming a legacy chat turns it into a conversation; if it's the one open,
+  // reopen it as that conversation so follow-ups and the title stay attached.
+  const handleLegacyChatRenamed = (imageryId, conversation) => {
+    let openImageryId = null;
+    try { openImageryId = localStorage.getItem(LAST_IMAGERY_KEY); } catch {}
+    if (!activeConversationRef.current && openImageryId === imageryId) {
+      handleSelectConversation(conversation);
+    }
+  };
+
   // Legacy sidebar item (pre-conversation history) -> reload the real imagery
   // + its real query/ack messages from the backend. Never fabricates a chat.
   const handleSelectHistoryItem = async (historyItem) => {
@@ -1035,6 +1045,7 @@ export function App() {
         onConversationRenamed={handleConversationRenamed}
         onConversationDeleted={handleConversationDeleted}
         onLegacyChatDeleted={handleLegacyChatDeleted}
+        onLegacyChatRenamed={handleLegacyChatRenamed}
         onNavigateScreen={(screenId) => {
           // The sidebar Projects shortcut should always show the full list,
           // never jump into a specific project workspace.

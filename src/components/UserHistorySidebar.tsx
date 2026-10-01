@@ -52,6 +52,7 @@ import {
   getAnalysisHistory,
   listConversations,
   renameConversation,
+  renameLegacyChat,
   type Conversation,
   type HistoryItem as ApiHistoryItem,
   type ProfileUser
@@ -64,6 +65,7 @@ interface UserHistorySidebarProps {
   onConversationRenamed?: (conversation: Conversation) => void
   onConversationDeleted?: (conversationId: string) => void
   onLegacyChatDeleted?: (imageryId: string) => void
+  onLegacyChatRenamed?: (imageryId: string, conversation: Conversation) => void
   onNavigateScreen: (screenId: string) => void
   activeScreen: string
   activeConversationId?: string | null
@@ -184,7 +186,7 @@ interface ConversationRowProps {
   isMenuOpen: boolean
   onOpenMenu: (key: string | null) => void
   onSelect: (entry: SidebarEntry) => void
-  onRename: (conversation: Conversation, title: string) => Promise<void>
+  onRename: (entry: SidebarEntry, title: string) => Promise<void>
   onDelete: (entry: SidebarEntry) => void
 }
 
@@ -258,11 +260,11 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
   const commitRename = async () => {
     setIsEditing(false)
     const title = draft.trim()
-    if (entry.kind !== "conversation" || !title || title === entry.title) return
-    await onRename(entry.conversation, title)
+    if (!title || title === entry.title) return
+    await onRename(entry, title)
   }
 
-  if (isEditing && entry.kind === "conversation") {
+  if (isEditing) {
     return (
       <SidebarMenuItem>
         <input
@@ -320,8 +322,7 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
       </div>
 
 
-      {/* Portaled ··· dropdown: Rename (conversations only -- a legacy chat has
-          no record to rename) + Delete */}
+      {/* Portaled ··· dropdown: Rename + Delete */}
       {isMenuOpen && createPortal(
         <div
           ref={menuRef}
@@ -329,20 +330,18 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
           style={menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 0, left: 0, visibility: "hidden" }}
           className="fixed z-[200] flex w-[200px] flex-col gap-1 rounded-[11px] border border-[rgba(148,163,184,0.28)] bg-[hsl(var(--sidebar-background))] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.45),0_0_0_1px_rgba(59,130,246,0.05)] animate-in fade-in-0 zoom-in-95 duration-150 transition-none"
         >
-          {entry.kind === "conversation" && (
-            <button
-              role="menuitem"
-              className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
-              onClick={() => {
-                onOpenMenu(null)
-                setDraft(entry.title)
-                setIsEditing(true)
-              }}
-            >
-              <Pencil className="w-4 h-4 text-[hsl(var(--sidebar-foreground)/0.7)]" />
-              <span>Rename</span>
-            </button>
-          )}
+          <button
+            role="menuitem"
+            className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
+            onClick={() => {
+              onOpenMenu(null)
+              setDraft(entry.title)
+              setIsEditing(true)
+            }}
+          >
+            <Pencil className="w-4 h-4 text-[hsl(var(--sidebar-foreground)/0.7)]" />
+            <span>Rename</span>
+          </button>
           <button
             role="menuitem"
             className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-red-400/90 transition-colors duration-100 hover:bg-red-500/10 hover:text-red-400"
@@ -369,6 +368,7 @@ export function UserHistorySidebar({
   onConversationRenamed,
   onConversationDeleted,
   onLegacyChatDeleted,
+  onLegacyChatRenamed,
   onNavigateScreen,
   activeScreen,
   activeConversationId,
@@ -458,12 +458,16 @@ export function UserHistorySidebar({
     dismissSidebar()
   }
 
-  const handleRename = async (conversation: Conversation, title: string) => {
+  const handleRename = async (entry: SidebarEntry, title: string) => {
     // Optimistic: show the new title immediately, reconcile with the server.
-    setEntries((prev) => prev.map((e) => (e.key === `c-${conversation.id}` ? { ...e, title } : e)))
+    setEntries((prev) => prev.map((e) => (e.key === entry.key ? { ...e, title } : e)))
     try {
-      const updated = await renameConversation(conversation.id, title)
-      onConversationRenamed?.(updated)
+      if (entry.kind === "conversation") {
+        onConversationRenamed?.(await renameConversation(entry.conversation.id, title))
+      } else {
+        // The backend turns the legacy chat into a real conversation.
+        onLegacyChatRenamed?.(entry.item.imagery_id, await renameLegacyChat(entry.item.imagery_id, title))
+      }
     } catch (err) {
       console.error("[SatQuery] Failed to rename conversation:", err)
       window.alert(`Could not rename conversation: ${(err as Error).message || "unknown error"}`)

@@ -299,11 +299,8 @@ def _select_jobs_using_imagery(imagery_id: str) -> list[dict]:
     return (primary.data or []) + (comparison.data or [])
 
 
-def delete_legacy_chat(imagery_id: str) -> None:
-    """Delete a legacy chat: the queries made against one image before
-    conversations existed (analysis_jobs with conversation_id NULL), their
-    results, and the image(s) they used once nothing else references them.
-    """
+def _legacy_jobs(imagery_id: str) -> list[dict]:
+    """The queries of a legacy chat: jobs against this image with no conversation."""
     jobs = [
         job
         for job in _select_jobs_using_imagery(imagery_id)
@@ -311,6 +308,59 @@ def delete_legacy_chat(imagery_id: str) -> None:
     ]
     if not jobs:
         raise NotFoundError("CHAT_NOT_FOUND", "Chat not found.")
+    return jobs
+
+
+def rename_legacy_chat(imagery_id: str, title: str) -> dict:
+    """Rename a legacy chat by turning it into a real conversation.
+
+    A legacy chat has no conversations row to hold a title, so one is created
+    (keeping the chat's original timestamps, so it stays where it was in the
+    sidebar) and the chat's jobs and images are moved into it.
+    """
+    cleaned = " ".join((title or "").split())
+    if not cleaned:
+        raise ValidationAppError("INVALID_TITLE", "Title cannot be empty.")
+    jobs = _legacy_jobs(imagery_id)
+    image_ids = {imagery_id} | {j["comparison_imagery_id"] for j in jobs if j.get("comparison_imagery_id")}
+    created_at = min(j["created_at"] for j in jobs)
+    updated_at = max(j["created_at"] for j in jobs)
+
+    client = get_supabase()
+    try:
+        response = (
+            client.table(TABLE)
+            .insert(
+                {
+                    "title": cleaned,
+                    "title_source": TitleSource.USER.value,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                }
+            )
+            .execute()
+        )
+        conversation = response.data[0]
+        link = {"conversation_id": conversation["id"]}
+        client.table("analysis_jobs").update(link).in_("id", [j["id"] for j in jobs]).execute()
+        for image_id in image_ids:
+            image = imagery_service.get_imagery(image_id)
+            if not image.get("conversation_id"):
+                client.table("imagery").update(link).eq("id", image_id).execute()
+    except NotFoundError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to convert legacy chat of imagery %s", imagery_id)
+        raise SupabaseError("Failed to rename chat.") from exc
+    return conversation
+
+
+def delete_legacy_chat(imagery_id: str) -> None:
+    """Delete a legacy chat: the queries made against one image before
+    conversations existed (analysis_jobs with conversation_id NULL), their
+    results, and the image(s) they used once nothing else references them.
+    """
+    jobs = _legacy_jobs(imagery_id)
 
     used_imagery = {imagery_id} | {j["comparison_imagery_id"] for j in jobs if j.get("comparison_imagery_id")}
     _delete_jobs([job["id"] for job in jobs])
