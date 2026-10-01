@@ -155,7 +155,7 @@ def get_conversation(conversation_id: str) -> dict:
     return response.data
 
 
-def _select_for_conversation(table: str, conversation_id: str) -> list[dict]:
+def select_for_conversation(table: str, conversation_id: str) -> list[dict]:
     client = get_supabase()
     try:
         response = (
@@ -176,12 +176,12 @@ def get_conversation_detail(conversation_id: str) -> dict:
     conversation = get_conversation(conversation_id)
     client = get_supabase()
     imagery = []
-    for stored in _select_for_conversation("imagery", conversation_id):
+    for stored in select_for_conversation("imagery", conversation_id):
         row = {**stored, "url": storage_service.resolve_url(client, stored.get("storage_path"))}
         # May fill in (once) the preview of an older TIFF row -- see resolve_thumbnail_url.
         row["thumbnail_url"] = imagery_service.resolve_thumbnail_url(client, row)
         imagery.append(row)
-    jobs = _select_for_conversation("analysis_jobs", conversation_id)
+    jobs = select_for_conversation("analysis_jobs", conversation_id)
     return {**conversation, "imagery": imagery, "jobs": jobs}
 
 
@@ -231,7 +231,7 @@ def generate_title(conversation_id: str) -> dict:
     if conversation.get("title_source") != TitleSource.DEFAULT.value:
         return conversation
 
-    for job in _select_for_conversation("analysis_jobs", conversation_id):
+    for job in select_for_conversation("analysis_jobs", conversation_id):
         title = title_service.generate_conversation_title(job.get("query"))
         if title:
             return _update(
@@ -274,9 +274,9 @@ def delete_conversation(conversation_id: str) -> None:
     get_conversation(conversation_id)
     client = get_supabase()
 
-    _delete_jobs([row["id"] for row in _select_for_conversation("analysis_jobs", conversation_id)])
+    _delete_jobs([row["id"] for row in select_for_conversation("analysis_jobs", conversation_id)])
 
-    for row in _select_for_conversation("imagery", conversation_id):
+    for row in select_for_conversation("imagery", conversation_id):
         imagery_service.delete_imagery(row["id"])
 
     try:
@@ -299,7 +299,7 @@ def _select_jobs_using_imagery(imagery_id: str) -> list[dict]:
     return (primary.data or []) + (comparison.data or [])
 
 
-def _legacy_jobs(imagery_id: str) -> list[dict]:
+def legacy_jobs(imagery_id: str) -> list[dict]:
     """The queries of a legacy chat: jobs against this image with no conversation."""
     jobs = [
         job
@@ -321,7 +321,7 @@ def rename_legacy_chat(imagery_id: str, title: str) -> dict:
     cleaned = " ".join((title or "").split())
     if not cleaned:
         raise ValidationAppError("INVALID_TITLE", "Title cannot be empty.")
-    jobs = _legacy_jobs(imagery_id)
+    jobs = legacy_jobs(imagery_id)
     image_ids = {imagery_id} | {j["comparison_imagery_id"] for j in jobs if j.get("comparison_imagery_id")}
     created_at = min(j["created_at"] for j in jobs)
     updated_at = max(j["created_at"] for j in jobs)
@@ -360,7 +360,7 @@ def delete_legacy_chat(imagery_id: str) -> None:
     conversations existed (analysis_jobs with conversation_id NULL), their
     results, and the image(s) they used once nothing else references them.
     """
-    jobs = _legacy_jobs(imagery_id)
+    jobs = legacy_jobs(imagery_id)
 
     used_imagery = {imagery_id} | {j["comparison_imagery_id"] for j in jobs if j.get("comparison_imagery_id")}
     _delete_jobs([job["id"] for job in jobs])

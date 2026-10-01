@@ -3,15 +3,16 @@ import {
   Sparkles, Send, Mic, Copy, Check, RefreshCw, Volume2, 
   ChevronDown, ChevronUp, Cpu, ExternalLink, ShieldCheck, 
   ImagePlus, X, Satellite, Layers, MapPin, ArrowLeft, GitCompare,
-  FolderKanban
+  FolderKanban, Download, Loader2, AlertCircle
 } from 'lucide-react';
 import { ImageViewer } from './ImageViewer';
 import { 
   uploadImagery, 
   submitAnalysis, 
   formatChangeDetectionError, 
-  validateChangeDetection, 
-  CHANGE_DETECTION_ERROR_CODES 
+  validateChangeDetection,
+  CHANGE_DETECTION_ERROR_CODES,
+  downloadAnalysisReport
 } from '../lib/apiClient';
 import { 
   isChangeDetectionIntent, 
@@ -403,6 +404,46 @@ export function Workspace({
     return scenario.uploadedFile?.name || scenario.title;
   })();
 
+  // PDF report of this chat (POST /reports). The backend reads the queries,
+  // results and images itself; a legacy chat is identified by its image.
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState(null);
+  const reportErrorTimer = useRef(null);
+  useEffect(() => () => clearTimeout(reportErrorTimer.current), []);
+  const reportTarget = conversationId
+    ? { conversationId }
+    : scenario.isLegacy && scenario.id
+      ? { imageryId: scenario.id }
+      : null;
+
+  const handleDownloadReport = async () => {
+    if (!reportTarget || isGeneratingReport) return;
+    setIsGeneratingReport(true);
+    setReportError(null);
+    try {
+      const attachedModel = activeModel
+        ? activeModel.name || (activeModel.models || []).map((m) => m.name).filter(Boolean).join(', ')
+        : null;
+      const { blob, filename } = await downloadAnalysisReport({ ...reportTarget, attachedModel });
+      const fallbackName = `SatQuery_Analysis_Report_${(scenario.title || 'Analysis').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'Analysis'}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || fallbackName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error('[SatQuery] Report generation failed:', err);
+      setReportError('Unable to generate the report. Please try again.');
+      clearTimeout(reportErrorTimer.current);
+      reportErrorTimer.current = setTimeout(() => setReportError(null), 5000);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   const handleCompareClick = async () => {
     if (backendImageryId && backendComparisonImageryId) {
       try {
@@ -443,6 +484,13 @@ export function Workspace({
 
   return (
     <div className="workspace-layout">
+      {reportError && (
+        <div className="model-toast animate-fadeIn" role="alert" style={{ borderLeftColor: '#ef4444' }}>
+          <AlertCircle size={16} style={{ color: '#f87171' }} />
+          <span>{reportError}</span>
+        </div>
+      )}
+
       {/* LEFT COLUMN: Large Satellite Image Viewer */}
       <div className="workspace-left">
         <ImageViewer
@@ -500,6 +548,18 @@ export function Workspace({
             >
               <span>Full Report</span>
               <ExternalLink size={13} />
+            </button>
+
+            <button
+              className="btn btn-secondary btn-report-download"
+              style={{ padding: '6px 12px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              onClick={handleDownloadReport}
+              disabled={!reportTarget || isGeneratingReport}
+              aria-busy={isGeneratingReport}
+              title={reportTarget ? 'Download a PDF report of this analysis' : 'Upload an image to create a report'}
+            >
+              {isGeneratingReport ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              <span>{isGeneratingReport ? 'Generating Report…' : 'Download Report'}</span>
             </button>
           </div>
         </div>

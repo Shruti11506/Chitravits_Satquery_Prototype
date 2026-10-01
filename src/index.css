@@ -1206,6 +1206,33 @@ code, pre {
   transform: translateY(-1px);
 }
 
+/* Workspace "Download Report": a .btn-secondary with a blue accent. */
+[data-theme="dark"] .btn-secondary.btn-report-download {
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.55);
+}
+[data-theme="dark"] .btn-secondary.btn-report-download:not(:disabled):hover {
+  background: #1e3a5f !important;
+  border-color: #60a5fa !important;
+  color: #dbeafe !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 16px rgba(59, 130, 246, 0.3);
+}
+[data-theme="light"] .btn-secondary.btn-report-download {
+  color: #1d4ed8;
+  border-color: #60a5fa;
+}
+[data-theme="light"] .btn-secondary.btn-report-download:not(:disabled):hover {
+  background: #eff6ff !important;
+  border-color: #2563eb !important;
+  color: #1e40af !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15), 0 0 14px rgba(37, 99, 235, 0.2);
+}
+.btn-secondary.btn-report-download:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .btn-outline {
   background: transparent;
   color: var(--accent);

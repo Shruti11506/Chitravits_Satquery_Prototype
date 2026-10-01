@@ -516,6 +516,52 @@ export function getEvidence(resultId: string) {
   >(`/results/${resultId}/evidence`);
 }
 
+// ---- Reports ---------------------------------------------------------------------
+
+/**
+ * Generates the PDF report of one chat (POST /reports) and returns it as a
+ * Blob. The backend reads every value from the database -- the client only
+ * names the chat and, optionally, the workspace's attached model (shown as
+ * metadata). Not `request()`: a successful answer is a PDF, not JSON.
+ */
+export async function downloadAnalysisReport(target: {
+  conversationId?: string | null;
+  imageryId?: string | null;
+  attachedModel?: string | null;
+}): Promise<{ blob: Blob; filename: string | null }> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: target.conversationId || null,
+        imagery_id: target.conversationId ? null : target.imageryId || null,
+        attached_model: target.attachedModel || null,
+      }),
+    });
+  } catch {
+    throw new ApiRequestError(0, {
+      code: "BACKEND_UNREACHABLE",
+      message: `Cannot reach the SatQuery backend at ${API_BASE_URL} -- is it running? (see README.md)`,
+    });
+  }
+
+  if (!response.ok) {
+    let error: ApiError = { code: "UNKNOWN_ERROR", message: "Request failed." };
+    try {
+      error = ((await response.json()) as ApiResponse<unknown>).error || error;
+    } catch {
+      /* not JSON (e.g. a proxy error page) -- keep the generic error */
+    }
+    throw new ApiRequestError(response.status, error);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || null;
+  return { blob: await response.blob(), filename };
+}
+
 // ---- Profile / analytics ---------------------------------------------------------
 // Single-workspace prototype: the backend resolves the profile itself, so no
 // call here ever sends a user id. Every number is aggregated from stored rows.

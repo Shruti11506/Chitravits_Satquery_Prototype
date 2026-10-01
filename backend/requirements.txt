@@ -10,3 +10,7 @@ pytest
 langgraph>=1.0,<2
 rasterio>=1.4,<2
 Pillow>=10,<13
+# PDF analysis reports (services/report_pdf.py); pure Python, no system packages.
+reportlab>=4,<5
+# IANA timezones for zoneinfo (report timestamps) on systems without a tz database (Windows, slim images).
+tzdata>=2024.1
