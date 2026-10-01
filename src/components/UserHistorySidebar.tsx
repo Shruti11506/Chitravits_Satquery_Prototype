@@ -911,19 +911,19 @@ export function UserHistorySidebar({
 
           {/* Error Message if deletion failed */}
           {deleteError && (
-            <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-red-950/40 border border-red-500/30 text-xs text-red-300">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-              <span>{deleteError}</span>
+            <div className="mb-5 flex w-full items-start gap-2 p-3 rounded-lg bg-red-950/40 border border-red-500/30 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-px" />
+              <span className="min-w-0 break-words">{deleteError}</span>
             </div>
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-1">
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
             <button
               type="button"
               onClick={() => setConversationToDelete(null)}
               disabled={isDeleting}
-              className="px-5 py-2.5 text-sm font-medium rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors disabled:opacity-50 cursor-pointer"
+              className="shrink-0 px-5 py-2.5 text-sm font-medium rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors disabled:opacity-50 cursor-pointer"
             >
               Cancel
             </button>
@@ -931,7 +931,7 @@ export function UserHistorySidebar({
               type="button"
               onClick={handleConfirmDelete}
               disabled={isDeleting}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+              className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
             >
               {isDeleting ? (
                 <>
