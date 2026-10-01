@@ -1,16 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  FolderKanban, Plus, Search, MessageSquare, FileText, 
-  Trash2, Edit3, ArrowLeft, ExternalLink, Calendar, 
-  Sparkles, Check, Sliders, Upload, ShieldCheck, 
-  HardDrive, FileUp, X, FolderTree, Layers, ChevronRight
+import React, { useState, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  FolderKanban, Plus, Search, MessageSquare, FileText,
+  Trash2, Edit3, ArrowLeft, ExternalLink, Calendar,
+  Sparkles, Check, Sliders, Upload, ShieldCheck,
+  HardDrive, FileUp, X, FolderTree, Layers, ChevronRight,
+  MoreHorizontal, Pencil
 } from 'lucide-react';
 import { 
-  listProjects,
   getProject,
   createProject as apiCreateProject,
   updateProject as apiUpdateProject,
-  deleteProject as apiDeleteProject,
   uploadProjectFile,
   deleteProjectFile
 } from '../lib/apiClient';
@@ -45,9 +45,72 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversation, initialProjectId }) {
-  const [projects, setProjects] = useState([]);
+// Small ⋯ dropdown of a project card, portaled to <body> at a fixed position
+// (the card's hover transform would otherwise trap it under its neighbours).
+// It follows its ⋯ button on scroll/resize rather than closing.
+function ProjectMenu({ anchorEl, onRename, onDelete }) {
+  const [pos, setPos] = useState(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const r = anchorEl.getBoundingClientRect();
+      setPos({
+        top: Math.min(r.bottom + 6, window.innerHeight - 110),
+        left: Math.max(8, Math.min(r.right - 200, window.innerWidth - 208))
+      });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [anchorEl]);
+
+  return (
+    <div
+      role="menu"
+      data-project-menu
+      style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, visibility: 'hidden' }}
+      className="fixed z-[200] flex w-[200px] flex-col gap-1 rounded-[11px] border border-[rgba(148,163,184,0.28)] bg-[#0b1220] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.45)] animate-in fade-in-0 zoom-in-95 duration-150"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        role="menuitem"
+        onClick={onRename}
+        className="flex h-10 w-full items-center gap-3 rounded-[8px] px-3 text-sm text-slate-100 transition-colors duration-100 hover:bg-blue-500/10 cursor-pointer"
+      >
+        <Pencil size={15} className="text-blue-300" />
+        <span>Rename project</span>
+      </button>
+      <button
+        role="menuitem"
+        onClick={onDelete}
+        className="flex h-10 w-full items-center gap-3 rounded-[8px] px-3 text-sm text-red-400/90 transition-colors duration-100 hover:bg-red-500/10 hover:text-red-400 cursor-pointer"
+      >
+        <Trash2 size={15} />
+        <span>Delete project</span>
+      </button>
+    </div>
+  );
+}
+
+// `projects` is App's shared list (also shown in the sidebar); this screen
+// never keeps its own copy -- it asks App to refresh it (onRefreshProjects).
+// Rename / Delete open App's dialogs (onRenameProject / onDeleteProject).
+export function ProjectsScreen({
+  onGoBack,
+  onStartProjectChat,
+  onOpenConversation,
+  initialProjectId,
+  projects = [],
+  onRefreshProjects,
+  onRenameProject,
+  onDeleteProject
+}) {
   const [activeProject, setActiveProject] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuAnchor, setMenuAnchor] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'instructions' | 'files'
   const [isLoading, setIsLoading] = useState(true);
@@ -72,8 +135,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     setIsLoading(true);
     setLoadError(null);
     try {
-      const apiProjects = await listProjects();
-      setProjects(apiProjects);
+      await onRefreshProjects();
       // Only open a specific project when explicitly requested via initialProjectId.
       // NEVER fall back to getActiveProjectId() here — that would auto-open
       // the last project every time the user clicks the sidebar "Projects" shortcut.
@@ -96,7 +158,6 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     } catch (err) {
       console.error('[SatQuery] Error loading projects from backend:', err);
       setLoadError(err?.message || 'Unable to connect to projects service.');
-      setProjects([]);
     } finally {
       setIsLoading(false);
     }
@@ -132,10 +193,32 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     setActiveProject(null);
     setActiveProjectId(null);
     // Refresh project list counts from backend
-    listProjects()
-      .then(setProjects)
-      .catch(err => console.error('[SatQuery] Refresh error:', err));
+    onRefreshProjects().catch(err => console.error('[SatQuery] Refresh error:', err));
   };
+
+  // A project deleted elsewhere (e.g. from the sidebar) while it is open here:
+  // leave its workspace instead of pointing at a project that no longer exists.
+  useEffect(() => {
+    if (!isLoading && activeProject && !projects.some((p) => p.id === activeProject.id)) {
+      setActiveProject(null);
+      setActiveProjectId(null);
+    }
+  }, [projects, activeProject, isLoading]);
+
+  // Close an open ⋯ menu on outside click / Escape.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const close = (e) => {
+      if (!e.target.closest?.('[data-project-menu]')) setOpenMenuId(null);
+    };
+    const onKey = (e) => e.key === 'Escape' && setOpenMenuId(null);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openMenuId]);
 
   const handleOpenCreateModal = () => {
     setEditingProject(null);
@@ -171,8 +254,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
           color: projectColor,
           custom_instructions: projectInstructions.trim() || null
         });
-        const apiProjects = await listProjects();
-        setProjects(apiProjects);
+        await onRefreshProjects();
         if (activeProject?.id === editingProject.id) {
           const detail = await getProject(editingProject.id);
           setActiveProject(detail);
@@ -186,8 +268,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
           color: projectColor,
           custom_instructions: projectInstructions.trim() || null
         });
-        const apiProjects = await listProjects();
-        setProjects(apiProjects);
+        await onRefreshProjects();
         setActiveProjectId(created.id);
         const detail = await getProject(created.id);
         setActiveProject(detail);
@@ -200,23 +281,6 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     }
   };
 
-  const handleDeleteProject = async (projId, e) => {
-    e?.stopPropagation();
-    try {
-      await apiDeleteProject(projId);
-      const apiProjects = await listProjects();
-      setProjects(apiProjects);
-      if (activeProject?.id === projId) {
-        setActiveProject(null);
-        setActiveProjectId(null);
-      }
-      showToast('Project deleted.');
-    } catch (err) {
-      console.error('[SatQuery] Delete project error:', err);
-      showToast(err?.message || 'Failed to delete project.');
-    }
-  };
-
   const handleSaveInstructions = async () => {
     if (!activeProject) return;
     try {
@@ -225,8 +289,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
       });
       const detail = await getProject(activeProject.id);
       setActiveProject(detail);
-      const apiProjects = await listProjects();
-      setProjects(apiProjects);
+      await onRefreshProjects();
       showToast('Project custom instructions saved.');
     } catch (err) {
       console.error('[SatQuery] Save instructions error:', err);
@@ -243,8 +306,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
       await uploadProjectFile(activeProject.id, file);
       const detail = await getProject(activeProject.id);
       setActiveProject(detail);
-      const apiProjects = await listProjects();
-      setProjects(apiProjects);
+      await onRefreshProjects();
       showToast(`File "${file.name}" added to project knowledge base.`);
     } catch (err) {
       console.error('[SatQuery] Upload project file error:', err);
@@ -260,8 +322,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
       await deleteProjectFile(activeProject.id, fileId);
       const detail = await getProject(activeProject.id);
       setActiveProject(detail);
-      const apiProjects = await listProjects();
-      setProjects(apiProjects);
+      await onRefreshProjects();
       showToast('Knowledge file removed.');
     } catch (err) {
       console.error('[SatQuery] Remove project file error:', err);
@@ -269,7 +330,13 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
     }
   };
 
-  const filteredProjects = projects.filter(p => 
+  // The open project's name comes from the shared list, so a rename made
+  // anywhere shows here at once (the detail object only adds chats/files).
+  const activeProjectName = activeProject
+    ? (projects.find((p) => p.id === activeProject.id)?.name ?? activeProject.name)
+    : null;
+
+  const filteredProjects = projects.filter(p =>
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
@@ -412,7 +479,7 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
           <div>
             <div className="flex items-center gap-2">
               <h2 className="screen-title">
-                {activeProject ? activeProject.name : 'Projects'}
+                {activeProject ? activeProjectName : 'Projects'}
               </h2>
               <span className="badge-pill badge-pill-cyan">ChatGPT-Style Workspaces</span>
             </div>
@@ -480,6 +547,19 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
             </div>
           )}
 
+          {/* Empty state (real empty list, not a failed load) */}
+          {!loadError && projects.length === 0 && (
+            <div className="projects-empty-state">
+              <div className="plus-icon-circle"><FolderKanban size={22} /></div>
+              <h3 className="projects-empty-title">No projects yet</h3>
+              <p className="projects-empty-text">Create a project to start organizing your satellite analyses.</p>
+              <button onClick={handleOpenCreateModal} className="btn btn-primary" title="Create a new project workspace">
+                <Plus size={16} />
+                <span>New Project</span>
+              </button>
+            </div>
+          )}
+
           {/* Grid of Projects */}
           <div className="projects-grid">
             {filteredProjects.map((proj) => (
@@ -499,21 +579,33 @@ export function ProjectsScreen({ onGoBack, onStartProjectChat, onOpenConversatio
                     <span className="text-xl">{proj.icon || '📁'}</span>
                   </div>
 
-                  <div className="card-menu-actions" onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleOpenEditModal(proj, e); }}
+                  <div className="card-menu-actions" onClick={(e) => e.stopPropagation()} data-project-menu>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (openMenuId === proj.id) {
+                          setOpenMenuId(null);
+                          return;
+                        }
+                        setMenuAnchor(e.currentTarget);
+                        setOpenMenuId(proj.id);
+                      }}
                       className="btn-icon-subtle"
-                      title="Edit project"
+                      title="Project options"
+                      aria-label={`Options for ${proj.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={openMenuId === proj.id}
                     >
-                      <Edit3 size={14} />
+                      <MoreHorizontal size={16} />
                     </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDeleteProject(proj.id, e); }}
-                      className="btn-icon-subtle text-red-400 hover:text-red-300"
-                      title="Delete project"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {openMenuId === proj.id && menuAnchor && createPortal(
+                      <ProjectMenu
+                        anchorEl={menuAnchor}
+                        onRename={() => { setOpenMenuId(null); onRenameProject?.(proj); }}
+                        onDelete={() => { setOpenMenuId(null); onDeleteProject?.(proj); }}
+                      />,
+                      document.body
+                    )}
                   </div>
                 </div>
 

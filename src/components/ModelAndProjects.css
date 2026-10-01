@@ -1388,6 +1388,21 @@
   justify-content: center;
 }
 
+/* "No projects yet" -- shown above the Create New Project card when the list is empty. */
+.projects-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 36px 20px 32px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+.projects-empty-title { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
+.projects-empty-text { margin: 6px 0 18px; font-size: 0.88rem; color: var(--text-muted); }
+
 .plus-icon-circle {
   width: 50px;
   height: 50px;

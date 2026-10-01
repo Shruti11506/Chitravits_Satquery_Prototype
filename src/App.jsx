@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Sun, Moon, ArrowLeft } from 'lucide-react';
+import { Plus, Sun, Moon, ArrowLeft, Check, AlertCircle } from 'lucide-react';
 import { ChitravitsEmblem } from './components/ui/ChitravitsLogo';
 import { LandingHero } from './components/LandingHero';
 import { Workspace } from './components/Workspace';
@@ -11,6 +11,7 @@ import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ReportScreen } from './components/ReportScreen';
 import { ProfileDashboard } from './components/ProfileDashboard';
 import { SettingsPage } from './components/SettingsPage';
+import { ProjectActionDialogs } from './components/ProjectActionDialogs';
 import { UpgradePlanScreen } from './components/UpgradePlanScreen';
 import { ModelAttachmentScreen } from './components/ModelAttachmentScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
@@ -368,6 +369,54 @@ export function App() {
     setActiveModelId(model ? model.id : null);
   };
 
+  // The ONE project list (GET /projects): the sidebar and the Projects page
+  // both read `projects`; every create/rename/delete ends by calling this.
+  // The active project keeps its detail fields but takes the fresh row's
+  // name etc., and is cleared if the project no longer exists.
+  const refreshProjects = useCallback(async () => {
+    const list = await listProjects();
+    setProjects(list);
+    const current = activeProjectRef.current;
+    if (current) {
+      const row = list.find((p) => p.id === current.id);
+      if (row) {
+        setActiveProject((prev) => (prev && prev.id === row.id ? { ...prev, ...row } : prev));
+      } else {
+        setActiveProject(null);
+        setActiveProjectId(null);
+      }
+    }
+    return list;
+  }, []);
+
+  // Rename / Delete dialogs, opened from the sidebar or the Projects page.
+  const [projectAction, setProjectAction] = useState(null);
+  const [projectToast, setProjectToast] = useState(null);
+  const projectToastTimer = useRef(null);
+  const showProjectToast = (message, tone = 'success') => {
+    clearTimeout(projectToastTimer.current);
+    setProjectToast({ message, tone });
+    projectToastTimer.current = setTimeout(() => setProjectToast(null), 3500);
+  };
+  useEffect(() => () => clearTimeout(projectToastTimer.current), []);
+
+  const handleProjectRenamed = async () => {
+    setProjectAction(null);
+    showProjectToast('Project renamed successfully.');
+    await refreshProjects().catch((err) => console.error('[SatQuery] Project refresh failed:', err));
+  };
+
+  const handleProjectDeleted = async (project) => {
+    setProjectAction(null);
+    if (initialProjectId === project.id) setInitialProjectId(null);
+    if (activeProjectRef.current?.id === project.id) {
+      setActiveProject(null);
+      setActiveProjectId(null);
+    }
+    showProjectToast('Project deleted successfully.');
+    await refreshProjects().catch((err) => console.error('[SatQuery] Project refresh failed:', err));
+  };
+
   const handleOpenProject = (project) => {
     // Track which specific project to open so ProjectsScreen can deep-link
     // into it on mount without a second round-trip or state conflict.
@@ -655,21 +704,9 @@ export function App() {
           }
         }
       } catch (err) {
+        // No sample projects: an empty list (the Projects page shows the real error).
         console.warn('[SatQuery] Projects load warning:', err);
-        setProjects([
-          {
-            id: 'demo-proj-1',
-            name: 'Himalayan Glacial Lake Outburst (GLOF)',
-            description: 'Bi-temporal SAR coherence and optical tracking of proglacial lakes across the Karakoram range.',
-            created_at: new Date().toISOString()
-          },
-          {
-            id: 'demo-proj-2',
-            name: 'Sundarbans Coastal Mangrove Canopy Assessment',
-            description: 'Multispectral NDWI & NDVI analysis quantifying mangrove recession and tidal erosion zones.',
-            created_at: new Date().toISOString()
-          }
-        ]);
+        setProjects([]);
       }
 
       // 3. Conversations history
@@ -1025,6 +1062,27 @@ export function App() {
         modalState={validationModal}
       />
 
+      {/* Project Rename / Delete dialogs (sidebar + Projects page ⋯ menus) */}
+      <ProjectActionDialogs
+        action={projectAction}
+        onClose={() => setProjectAction(null)}
+        onRenamed={handleProjectRenamed}
+        onDeleted={handleProjectDeleted}
+        onError={(message) => showProjectToast(message, 'error')}
+      />
+      {projectToast && (
+        <div
+          className="model-toast animate-fadeIn"
+          role={projectToast.tone === 'error' ? 'alert' : 'status'}
+          style={projectToast.tone === 'error' ? { borderLeftColor: '#ef4444', zIndex: 100000 } : { zIndex: 100000 }}
+        >
+          {projectToast.tone === 'error'
+            ? <AlertCircle size={16} style={{ color: '#f87171' }} />
+            : <Check size={16} className="text-blue-400" />}
+          <span>{projectToast.message}</span>
+        </div>
+      )}
+
       {/* SatQuery Satellite Intelligence Initial Workspace Loader */}
       {isInitializing && (
         <InitialLoader
@@ -1065,6 +1123,8 @@ export function App() {
         projects={projects}
         activeProjectId={activeProject?.id || null}
         onOpenProject={handleOpenProject}
+        onRenameProject={(project) => setProjectAction({ type: 'rename', project })}
+        onDeleteProject={(project) => setProjectAction({ type: 'delete', project })}
         onOpenSettings={() => navigateToScreen('settings')}
       />
 
@@ -1140,6 +1200,10 @@ export function App() {
                 onStartProjectChat={handleStartProjectChat}
                 onOpenConversation={handleSelectConversation}
                 initialProjectId={initialProjectId}
+                projects={projects}
+                onRefreshProjects={refreshProjects}
+                onRenameProject={(project) => setProjectAction({ type: 'rename', project })}
+                onDeleteProject={(project) => setProjectAction({ type: 'delete', project })}
               />
             )}
 

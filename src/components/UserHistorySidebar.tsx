@@ -81,6 +81,8 @@ interface UserHistorySidebarProps {
   projects?: any[]
   activeProjectId?: string | null
   onOpenProject?: (project: any) => void
+  onRenameProject?: (project: any) => void
+  onDeleteProject?: (project: any) => void
   onOpenSettings: () => void
 }
 
@@ -181,19 +183,9 @@ function buildEntries(conversations: Conversation[], history: ApiHistoryItem[]):
   return entries.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 }
 
-interface ConversationRowProps {
-  entry: SidebarEntry
-  isActive: boolean
-  isMenuOpen: boolean
-  onOpenMenu: (key: string | null) => void
-  onSelect: (entry: SidebarEntry) => void
-  onRename: (entry: SidebarEntry, title: string) => Promise<void>
-  onDelete: (entry: SidebarEntry) => void
-}
-
-function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete }: ConversationRowProps) {
-  const [isEditing, setIsEditing] = React.useState(false)
-  const [draft, setDraft] = React.useState(entry.title)
+// The ⋯ menu of a sidebar row (conversation or project): positioning of the
+// portaled popup and closing on outside click / Escape.
+function useRowMenu(isMenuOpen: boolean, onOpenMenu: (key: string | null) => void) {
   const menuRef = React.useRef<HTMLDivElement>(null)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const [menuPos, setMenuPos] = React.useState<{ top: number; left: number } | null>(null)
@@ -257,6 +249,24 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
       document.removeEventListener("keydown", closeOnEscape)
     }
   }, [isMenuOpen, onOpenMenu])
+
+  return { menuRef, triggerRef, menuPos }
+}
+
+interface ConversationRowProps {
+  entry: SidebarEntry
+  isActive: boolean
+  isMenuOpen: boolean
+  onOpenMenu: (key: string | null) => void
+  onSelect: (entry: SidebarEntry) => void
+  onRename: (entry: SidebarEntry, title: string) => Promise<void>
+  onDelete: (entry: SidebarEntry) => void
+}
+
+function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, onRename, onDelete }: ConversationRowProps) {
+  const [isEditing, setIsEditing] = React.useState(false)
+  const [draft, setDraft] = React.useState(entry.title)
+  const { menuRef, triggerRef, menuPos } = useRowMenu(isMenuOpen, onOpenMenu)
 
   const commitRename = async () => {
     setIsEditing(false)
@@ -362,6 +372,92 @@ function ConversationRow({ entry, isActive, isMenuOpen, onOpenMenu, onSelect, on
 }
 
 
+interface ProjectRowProps {
+  project: any
+  isActive: boolean
+  isMenuOpen: boolean
+  onOpenMenu: (key: string | null) => void
+  onOpen: (project: any) => void
+  onRename?: (project: any) => void
+  onDelete?: (project: any) => void
+}
+
+// A project in the sidebar's PROJECTS list, with the same hover ⋯ menu as a
+// conversation row (Rename project / Delete project open App's dialogs).
+function ProjectRow({ project, isActive, isMenuOpen, onOpenMenu, onOpen, onRename, onDelete }: ProjectRowProps) {
+  const { menuRef, triggerRef, menuPos } = useRowMenu(isMenuOpen, onOpenMenu)
+  const key = `p-${project.id}`
+  const hasActions = Boolean(onRename || onDelete)
+
+  return (
+    <SidebarMenuItem>
+      <div className="group/row relative flex items-center w-full gap-1.5 rounded-lg">
+        <SidebarMenuButton
+          onClick={() => onOpen(project)}
+          isActive={isActive}
+          className="flex-1 min-w-0 text-[0.88rem] py-1.5 h-8 gap-2"
+          tooltip={project.name}
+        >
+          <span className="text-sm shrink-0">{project.icon || "📁"}</span>
+          <span className="truncate">{project.name}</span>
+        </SidebarMenuButton>
+
+        {hasActions && (
+          <button
+            ref={triggerRef}
+            data-state={isMenuOpen ? "open" : "closed"}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenMenu(isMenuOpen ? null : key)
+            }}
+            title="Project options"
+            aria-label={`Options for ${project.name}`}
+            aria-haspopup="menu"
+            aria-expanded={isMenuOpen}
+            className="shrink-0 p-1 rounded-md opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-100 cursor-pointer"
+          >
+            <MoreHorizontal className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {isMenuOpen && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          style={menuPos ? { top: menuPos.top, left: menuPos.left } : { top: 0, left: 0, visibility: "hidden" }}
+          className="fixed z-[200] flex w-[200px] flex-col gap-1 rounded-[11px] border border-[rgba(148,163,184,0.28)] bg-[hsl(var(--sidebar-background))] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.45),0_0_0_1px_rgba(59,130,246,0.05)] animate-in fade-in-0 zoom-in-95 duration-150 transition-none"
+        >
+          <button
+            role="menuitem"
+            className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-[hsl(var(--sidebar-foreground)/0.95)] transition-colors duration-100 hover:bg-blue-500/10"
+            onClick={() => {
+              onOpenMenu(null)
+              onRename?.(project)
+            }}
+          >
+            <Pencil className="w-4 h-4 text-blue-400" />
+            <span>Rename project</span>
+          </button>
+          <button
+            role="menuitem"
+            className="flex h-11 w-full items-center gap-3 rounded-[8px] px-3.5 text-sm text-red-400/90 transition-colors duration-100 hover:bg-red-500/10 hover:text-red-400"
+            onClick={() => {
+              onOpenMenu(null)
+              onDelete?.(project)
+            }}
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete project</span>
+          </button>
+        </div>,
+        document.body
+      )}
+    </SidebarMenuItem>
+  )
+}
+
+
 export function UserHistorySidebar({
   onNewChat,
   onSelectConversation,
@@ -383,6 +479,8 @@ export function UserHistorySidebar({
   projects,
   activeProjectId,
   onOpenProject,
+  onRenameProject,
+  onDeleteProject,
   onOpenSettings,
 }: UserHistorySidebarProps) {
   // Real backend data ONLY -- see CLAUDE.md / backend README. No hardcoded
@@ -681,25 +779,21 @@ export function UserHistorySidebar({
             </div>
             <SidebarGroupContent>
               <SidebarMenu>
-                {projects.slice(0, 4).map((p) => {
-                  const isProjActive = activeScreen === "projects" && activeProjectId === p.id;
-                  return (
-                    <SidebarMenuItem key={p.id}>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          onOpenProject ? onOpenProject(p) : onNavigateScreen("projects");
-                          dismissSidebar();
-                        }}
-                        isActive={isProjActive}
-                        className="text-[0.88rem] py-1.5 h-8 gap-2"
-                        tooltip={p.name}
-                      >
-                        <span className="text-sm shrink-0">{p.icon || "📁"}</span>
-                        <span className="truncate">{p.name}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {projects.slice(0, 4).map((p) => (
+                  <ProjectRow
+                    key={p.id}
+                    project={p}
+                    isActive={activeScreen === "projects" && activeProjectId === p.id}
+                    isMenuOpen={openMenuKey === `p-${p.id}`}
+                    onOpenMenu={setOpenMenuKey}
+                    onOpen={(project) => {
+                      onOpenProject ? onOpenProject(project) : onNavigateScreen("projects");
+                      dismissSidebar();
+                    }}
+                    onRename={onRenameProject}
+                    onDelete={onDeleteProject}
+                  />
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -915,7 +1009,7 @@ export function UserHistorySidebar({
               <Trash2 className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 id="delete-conv-title" className="text-lg font-semibold text-white tracking-tight leading-tight">
+              <h3 id="delete-conv-title" className="text-lg font-semibold tracking-tight leading-tight" style={{ color: "#ffffff" }}>
                 Delete Conversation
               </h3>
               <p className="text-xs text-slate-400 mt-1">
