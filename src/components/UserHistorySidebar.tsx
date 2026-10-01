@@ -503,7 +503,10 @@ export function UserHistorySidebar({
       else await deleteLegacyChat(target.item.imagery_id)
       notifyDeleted()
     } catch (err: any) {
-      if (err?.status === 404 || err?.code === "CONVERSATION_NOT_FOUND" || err?.message?.includes("not found")) {
+      const alreadyGone =
+        target.kind === "conversation" &&
+        (err?.status === 404 || err?.code === "CONVERSATION_NOT_FOUND" || err?.message?.includes("not found"))
+      if (alreadyGone) {
         notifyDeleted()
       } else {
         console.error("[SatQuery] Failed to delete conversation:", err)

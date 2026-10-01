@@ -456,7 +456,9 @@ export async function deleteLegacyChat(imageryId: string) {
   try {
     return await request<{ id: string }>(`/conversations/legacy/${imageryId}`, { method: "DELETE" });
   } catch (err: any) {
-    if (err?.status === 404 || err?.code === "CHAT_NOT_FOUND") {
+    // Only the endpoint's own "not found" -- a bare 404 can also mean a backend
+    // that predates this route, and that must surface as an error.
+    if (err?.code === "CHAT_NOT_FOUND") {
       return { id: imageryId, status: "already_deleted" };
     }
     throw err;
