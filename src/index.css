@@ -182,11 +182,16 @@
   --glass-blur: blur(14px);
 }
 
-/* Base Reset */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Base Reset — must live in @layer base so Tailwind v4 spacing utilities
+   (p-*, m-*, etc., emitted into @layer utilities) can override it. An
+   UNLAYERED universal reset beats every layered utility, which silently
+   zeroed all Tailwind padding/margin across the app. */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 /* ==========================================================================
