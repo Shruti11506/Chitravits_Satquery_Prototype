@@ -877,7 +877,7 @@ export function UserHistorySidebar({
         aria-labelledby="delete-conv-title"
       >
         <div
-          className="relative w-full max-w-[440px] rounded-2xl border border-red-500/25 bg-[#0d131f] p-6 text-white shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),0_0_30px_rgba(239,68,68,0.12)] animate-in zoom-in-95 duration-200"
+          className="relative w-full max-w-[520px] rounded-[18px] border border-red-500/25 bg-[#0d131f] p-6 sm:p-7 text-white shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),0_0_30px_rgba(239,68,68,0.12)] animate-in zoom-in-95 duration-200"
         >
           {/* Close button */}
           <button
@@ -890,23 +890,23 @@ export function UserHistorySidebar({
           </button>
 
           {/* Header & Icon */}
-          <div className="flex items-start gap-3.5 mb-4">
+          <div className="flex items-start gap-4 mb-5 pr-8">
             <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-red-500/10 border border-red-500/25 text-red-400 shrink-0">
               <Trash2 className="w-5 h-5" />
             </div>
-            <div className="flex-1 min-w-0 pr-6">
-              <h3 id="delete-conv-title" className="text-base font-semibold text-white tracking-tight">
+            <div className="flex-1 min-w-0">
+              <h3 id="delete-conv-title" className="text-lg font-semibold text-white tracking-tight leading-tight">
                 Delete Conversation
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-1">
                 This action cannot be undone.
               </p>
             </div>
           </div>
 
           {/* Dialog Description */}
-          <div className="text-sm text-slate-300 leading-relaxed mb-6 bg-slate-900/60 rounded-xl p-3.5 border border-slate-800/80">
-            Are you sure you want to delete <span className="font-semibold text-white">"{conversationToDelete.title}"</span>? All associated analysis queries, jobs, and uploaded imagery will be permanently removed.
+          <div className="text-sm text-slate-300 leading-relaxed mb-6 bg-slate-900/60 rounded-xl px-4 py-4 border border-slate-800/80">
+            Are you sure you want to delete <span className="font-semibold text-white break-words">"{conversationToDelete.title}"</span>? All associated analysis queries, jobs, and uploaded imagery will be permanently removed.
           </div>
 
           {/* Error Message if deletion failed */}
@@ -918,12 +918,12 @@ export function UserHistorySidebar({
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-3">
+          <div className="flex items-center justify-end gap-3 pt-1">
             <button
               type="button"
               onClick={() => setConversationToDelete(null)}
               disabled={isDeleting}
-              className="px-4 py-2 text-sm font-medium rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors disabled:opacity-50 cursor-pointer"
+              className="px-5 py-2.5 text-sm font-medium rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors disabled:opacity-50 cursor-pointer"
             >
               Cancel
             </button>
@@ -931,7 +931,7 @@ export function UserHistorySidebar({
               type="button"
               onClick={handleConfirmDelete}
               disabled={isDeleting}
-              className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
             >
               {isDeleting ? (
                 <>
