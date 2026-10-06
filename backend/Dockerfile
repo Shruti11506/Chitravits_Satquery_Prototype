@@ -11,6 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# SatQuery agent source (vendored and committed for inspection at backend/satquery).
+# Imported directly from /app/satquery at runtime -- no pip install, so there is
+# no duplicate copy in site-packages. Every satquery runtime dependency is already
+# pinned in requirements.txt above.
+COPY satquery ./satquery
+
 COPY app ./app
 
 EXPOSE 8000
