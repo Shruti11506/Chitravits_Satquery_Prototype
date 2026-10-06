@@ -49,6 +49,33 @@ class Settings(BaseSettings):
     VALIDATION_MAX_PIXELS: int = 400_000_000
     VALIDATION_MAX_INPUT_IMAGES: int = 2
 
+    # --- SatQuery agent bridge (app/agent_bridge) ------------------------
+    # Default OFF: with it false the backend behaves exactly as `main` does --
+    # a queued analysis job is recorded and left for a future AI layer, and the
+    # sibling `satquery` package is never imported. Set true to have the real
+    # LangGraph agent process queued jobs in a background task.
+    AGENT_ENABLED: bool = False
+    # Which wire protocol the agent's model clients speak:
+    #   "wrapper" = the deployed remote wrapper APIs (POST /predict, multipart)
+    #   "native"  = in-tree stub services (POST /v1/.../infer, JSON) -- dev only
+    # The temporary Cloudflare tunnel URLs and the permanent *.satquery.online
+    # subdomains are both just values of the *_URL settings below; swapping
+    # them needs no code change.
+    AGENT_MODEL_PROTOCOL: str = "wrapper"
+    # Remote model wrapper service URLs (read from the environment only).
+    AGENT_EARTHMIND_URL: str = ""
+    AGENT_MCD_MAMBA_URL: str = ""
+    AGENT_GEOGROUND_URL: str = ""
+    # Optional per-service credentials (backend only; never exposed to the
+    # frontend, never put in a VITE_* variable).
+    AGENT_EARTHMIND_API_KEY: str = ""
+    AGENT_MCD_MAMBA_API_KEY: str = ""
+    AGENT_GEOGROUND_API_KEY: str = ""
+    # Wire each specialist tool into the agent. false makes queries that need it
+    # report an honest "not available" instead of running it.
+    AGENT_MCD_MAMBA_ENABLED: bool = True
+    AGENT_GEOGROUND_ENABLED: bool = True
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

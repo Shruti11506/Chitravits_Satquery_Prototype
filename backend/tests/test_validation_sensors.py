@@ -438,10 +438,19 @@ def test_23_defaults_skip_the_deferred_gates():
         assert result.check_details[name].status == "skipped" and name not in result.checks
 
 
-def test_chat_profile_keeps_the_dimension_gate_on():
+def test_chat_profile_accepts_same_aspect_different_resolution():
+    # 64x48 and 128x96 are both 4:3 -- same aspect, different resolution. The
+    # chat gate normalises (resamples) such a pair rather than blocking it.
     result = _cd(_meta("T1", _geotiff(count=1, width=64, height=48), "a.tif"),
                  _meta("T2", _geotiff(count=1, width=128, height=96), "b.tif"))
-    assert result.errors[0].code == "IMAGE_DIMENSION_MISMATCH"
+    assert result.valid, result.errors
+
+
+def test_chat_profile_rejects_incompatible_aspect():
+    # Genuinely different framing (4:3 vs 16:9) is still rejected by the chat gate.
+    result = _cd(_meta("T1", _geotiff(count=1, width=64, height=48), "a.tif"),
+                 _meta("T2", _geotiff(count=1, width=192, height=108), "b.tif"))
+    assert result.errors[0].code == "ASPECT_RATIO_MISMATCH"
 
 
 def test_24_landsat_pair_is_unsupported():

@@ -1,7 +1,9 @@
-"""Business logic for retrieving analysis_results and evidence.
+"""Business logic for analysis_results and evidence.
 
-Retrieval only -- nothing here generates results, evidence, bounding boxes,
-or confidence scores. If no AI result exists yet, callers get a 404.
+Retrieval, plus persistence for the agent bridge: ``create_result`` /
+``create_evidence`` store what the SatQuery agent actually returned. Nothing
+here invents an answer, a bounding box or a confidence score -- it only writes
+values passed in by the bridge, which got them from the model.
 """
 import logging
 
@@ -12,6 +14,32 @@ logger = logging.getLogger(__name__)
 
 RESULTS_TABLE = "analysis_results"
 EVIDENCE_TABLE = "evidence"
+
+
+def create_result(row: dict) -> dict:
+    """Insert one analysis_results row (from the agent) and return it."""
+    client = get_supabase()
+    try:
+        response = client.table(RESULTS_TABLE).insert(row).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Supabase insert failed for analysis_results (job %s)", row.get("job_id"))
+        raise SupabaseError("Failed to save the analysis result.") from exc
+    if not response.data:
+        raise SupabaseError("Analysis result insert returned no data.")
+    return response.data[0]
+
+
+def create_evidence(rows: list[dict]) -> list[dict]:
+    """Insert evidence rows for a result. No-op for an empty list."""
+    if not rows:
+        return []
+    client = get_supabase()
+    try:
+        response = client.table(EVIDENCE_TABLE).insert(rows).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Supabase insert failed for evidence (%d rows)", len(rows))
+        raise SupabaseError("Failed to save analysis evidence.") from exc
+    return response.data or []
 
 
 def get_result(result_id: str) -> dict:

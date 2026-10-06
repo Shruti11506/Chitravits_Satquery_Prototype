@@ -30,14 +30,25 @@ def aspect_ratio(width: int | None, height: int | None) -> float | None:
 def aspect_ratio_issue(
     t1: RasterFacts, t2: RasterFacts, *, tolerance: float, t1_label: str, t2_label: str
 ) -> ChangeDetectionIssue | None:
+    """Reject only a *genuinely* different framing/crop.
+
+    ``tolerance`` is a RELATIVE tolerance on the aspect ratio
+    (``|r1 - r2| / min(r1, r2)``), so it behaves consistently whether the
+    scenes are near-square or wide: a small percentage difference that can be
+    safely normalised (resampled to a common grid before inference) passes,
+    while a real framing change (e.g. 16:9 vs 4:3) is still rejected. Two
+    same-ratio captures at different resolutions always pass (difference 0).
+    """
     ratio_1, ratio_2 = aspect_ratio(t1.width, t1.height), aspect_ratio(t2.width, t2.height)
     if ratio_1 is None or ratio_2 is None:
         return None  # nothing to compare -- INVALID_DIMENSIONS already covers a zero/missing size
-    if abs(ratio_1 - ratio_2) > tolerance:
+    relative_diff = abs(ratio_1 - ratio_2) / min(ratio_1, ratio_2)
+    if relative_diff > tolerance:
         return ChangeDetectionIssue.of(
             ASPECT_RATIO_MISMATCH,
             f"{t1_label} and {t2_label} have incompatible aspect ratios "
-            f"({ratio_1:.4f} vs {ratio_2:.4f}, tolerance {tolerance}).",
+            f"({ratio_1:.4f} vs {ratio_2:.4f}; differ by {relative_diff:.1%}, "
+            f"relative tolerance {tolerance:.0%}).",
             t1=f"{ratio_1:.4f}",
             t2=f"{ratio_2:.4f}",
         )

@@ -149,13 +149,26 @@ def test_rgb_plus_multispectral_is_rejected(client, fake_supabase):
     _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"MODALITY_MISMATCH"})
 
 
-def test_different_dimensions_is_rejected(client, fake_supabase):
+def test_same_aspect_different_resolution_is_accepted(client, fake_supabase):
+    # Same aspect ratio (1.0), different resolution -> safely normalisable
+    # (resampled to a common grid before inference), so the chat gate must NOT
+    # block it. (Was rejected when exact-dimension equality was required.)
     t1 = _upload(client, "t1.tif", _geotiff(descriptions=["red", "green", "blue"], width=200, height=200), "image/tiff")
     t2 = _upload(client, "t2.tif", _geotiff(descriptions=["red", "green", "blue"], width=100, height=100), "image/tiff")
-    _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"IMAGE_DIMENSION_MISMATCH"})
+    _assert_valid(client, fake_supabase, t1, t2)
+
+
+def test_small_aspect_difference_is_accepted(client, fake_supabase):
+    # The reported production case: aspect 1.01 vs 0.99 (~2% apart) -> within the
+    # 5% relative tolerance, safely normalisable -> accepted.
+    t1 = _upload(client, "t1.tif", _geotiff(descriptions=["red", "green", "blue"], width=1010, height=1000), "image/tiff")
+    t2 = _upload(client, "t2.tif", _geotiff(descriptions=["red", "green", "blue"], width=990, height=1000), "image/tiff")
+    _assert_valid(client, fake_supabase, t1, t2)
 
 
 def test_different_aspect_ratios_is_rejected(client, fake_supabase):
+    # Genuinely different framing (16:9 vs 4:3) -> not safely normalisable ->
+    # still rejected.
     t1 = _upload(client, "t1.tif", _geotiff(descriptions=["red", "green", "blue"], width=1920, height=1080), "image/tiff")
     t2 = _upload(client, "t2.tif", _geotiff(descriptions=["red", "green", "blue"], width=1024, height=768), "image/tiff")
     _assert_rejected(client, fake_supabase, t1, t2, expected_codes={"ASPECT_RATIO_MISMATCH"})

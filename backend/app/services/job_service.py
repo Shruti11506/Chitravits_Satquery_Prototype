@@ -5,6 +5,7 @@ schedules, or simulates AI processing -- jobs are created with status
 "queued" and stay there until a future AI layer picks them up.
 """
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.core.exceptions import NotFoundError, SchemaNotMigratedError, SupabaseError
@@ -15,6 +16,46 @@ from app.services.imagery_service import PAIR_MIGRATION_HINT
 logger = logging.getLogger(__name__)
 
 TABLE = "analysis_jobs"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def update_job(job_id: str, fields: dict) -> dict:
+    """Patch an analysis_jobs row (status, result_id, timestamps, error).
+
+    Used by the agent bridge to move a job through its lifecycle. Only the
+    columns present in ``fields`` are changed; every column written here
+    already exists in the current schema (no migration needed).
+    """
+    client = get_supabase()
+    try:
+        response = client.table(TABLE).update(fields).eq("id", job_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Supabase update failed for analysis_jobs %s", job_id)
+        raise SupabaseError("Failed to update analysis job.") from exc
+    if not response.data:
+        raise NotFoundError("JOB_NOT_FOUND", f"Analysis job '{job_id}' was not found.")
+    return response.data[0]
+
+
+def mark_processing(job_id: str) -> dict:
+    return update_job(job_id, {"status": "processing", "started_at": _now_iso()})
+
+
+def mark_completed(job_id: str, *, result_id: str, model_name: str | None = None) -> dict:
+    fields: dict = {"status": "completed", "result_id": result_id, "completed_at": _now_iso()}
+    if model_name:
+        fields["model_name"] = model_name
+    return update_job(job_id, fields)
+
+
+def mark_failed(job_id: str, *, error_message: str) -> dict:
+    return update_job(
+        job_id,
+        {"status": "failed", "error_message": (error_message or "")[:2000], "completed_at": _now_iso()},
+    )
 
 
 def create_job(

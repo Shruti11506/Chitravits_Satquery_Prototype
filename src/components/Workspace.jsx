@@ -6,13 +6,16 @@ import {
   FolderKanban, Download, Loader2, AlertCircle
 } from 'lucide-react';
 import { ImageViewer } from './ImageViewer';
-import { 
-  uploadImagery, 
-  submitAnalysis, 
-  formatChangeDetectionError, 
+import {
+  uploadImagery,
+  submitAnalysis,
+  formatChangeDetectionError,
   validateChangeDetection,
   CHANGE_DETECTION_ERROR_CODES,
-  downloadAnalysisReport
+  downloadAnalysisReport,
+  getAnalysisJob,
+  getResult,
+  getEvidence
 } from '../lib/apiClient';
 import { 
   isChangeDetectionIntent, 
@@ -32,6 +35,52 @@ const QUICK_SUGGESTIONS = [
 ];
 
 const LAST_IMAGERY_KEY = 'satquery-last-imagery-id';
+
+// Pull the agent's visual output (model overlay images, spatial detections,
+// execution trace) off a polled AI message so the bubble can render it. The
+// agent already carries everything here -- the model-produced overlay URL
+// (pixel coordinates; no CRS required), the per-region bbox + confidence, and
+// the tool execution order -- in `analysisResult.raw_output`, with the
+// evidence rows as a fallback source. Returns empty arrays when there is
+// nothing visual to show (e.g. a plain VQA answer).
+function getAgentArtifacts(msg) {
+  const raw = (msg.analysisResult && msg.analysisResult.raw_output) || {};
+  const evidence = Array.isArray(msg.evidence) ? msg.evidence : [];
+
+  // Model output images (grounding overlay, change map, mask). The overlay is
+  // the original scene with the detected region already drawn on it.
+  let images = (raw.output_files || [])
+    .filter((f) => f && f.url)
+    .map((f) => ({ url: f.url, kind: f.kind || 'image', producer: f.producer }));
+  if (images.length === 0) {
+    images = evidence
+      .filter((e) => e.evidence_type === 'output_file' && e.metadata && e.metadata.url)
+      .map((e) => ({ url: e.metadata.url, kind: e.metadata.kind || 'image', producer: e.source_reference }));
+  }
+
+  // Spatial detections / change regions (pixel or geo coordinates).
+  let detections = (raw.spatial_results || []).map((s) => ({
+    label: s.region_id, confidence: s.confidence, bbox: s.bbox, source: s.source_tool,
+  }));
+  if (detections.length === 0) {
+    detections = evidence
+      .filter((e) => e.evidence_type === 'change_region')
+      .map((e) => ({
+        label: (e.metadata && e.metadata.region_id) || e.description,
+        confidence: e.confidence,
+        bbox: e.bbox && e.bbox.bbox,
+        source: e.source_reference,
+      }));
+  }
+
+  // Execution trace (which tools ran, in order).
+  const trace = raw.execution_trace || null;
+  const steps = trace && Array.isArray(trace.tool_execution_order)
+    ? trace.tool_execution_order.map((t) => ({ tool: t.tool_name, status: t.status }))
+    : [];
+
+  return { images, detections, steps, toolSelected: raw.tool_selected || null };
+}
 
 export function Workspace({ 
   scenario, 
@@ -106,6 +155,89 @@ export function Workspace({
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
+
+  // --- Poll queued analysis jobs to their real result --------------------
+  // When the backend agent bridge is enabled (AGENT_ENABLED), it runs the
+  // SatQuery agent in the background; the ack message we add carries a jobId.
+  // Poll job -> result -> evidence and fill the SAME message in place with the
+  // real answer/confidence/evidence. Each job is polled once. Never fabricates
+  // an answer: a failed job shows its real error, a slow one stays "processing".
+  // With the bridge disabled the job simply stays "queued" and the poll times
+  // out quietly -- exactly the pre-agent behavior.
+  const polledJobsRef = useRef(new Set());
+
+  const patchMessage = (id, changes) =>
+    setMessages(prev => prev.map(m => (m.id === id ? { ...m, ...changes } : m)));
+
+  useEffect(() => {
+    const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+    const pending = messages.filter(
+      m => m.sender === 'ai' && m.jobId && !TERMINAL.has(m.status) && !polledJobsRef.current.has(m.jobId)
+    );
+
+    pending.forEach((msg) => {
+      polledJobsRef.current.add(msg.jobId);
+      const jobId = msg.jobId;
+      const messageId = msg.id;
+
+      (async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const deadline = Date.now() + 120_000; // give the agent up to 2 minutes
+        while (Date.now() < deadline) {
+          await sleep(1200);
+          let job;
+          try {
+            job = await getAnalysisJob(jobId);
+          } catch {
+            continue; // transient; keep polling until the deadline
+          }
+
+          if (job.status === 'completed' && job.result_id) {
+            try {
+              const result = await getResult(job.result_id);
+              let evidence = [];
+              try { evidence = await getEvidence(job.result_id); } catch { /* optional */ }
+              const raw = result.raw_output || {};
+              patchMessage(messageId, {
+                text: result.answer || 'Analysis complete.',
+                status: 'completed',
+                confidence: result.confidence != null ? Math.round(result.confidence * 100) : null,
+                taskType: raw.tool_selected
+                  ? `${raw.tool_selected}${result.analysis_type ? ` (${result.analysis_type})` : ''}`
+                  : 'Analysis',
+                analysisResult: result,
+                evidence,
+              });
+            } catch {
+              patchMessage(messageId, {
+                text: 'The analysis completed but its result could not be loaded.',
+                isError: true,
+                status: 'failed',
+              });
+            }
+            return;
+          }
+
+          if (job.status === 'failed' || job.status === 'cancelled') {
+            patchMessage(messageId, {
+              text: job.error_message || 'The analysis could not be completed.',
+              isError: true,
+              status: job.status,
+            });
+            return;
+          }
+
+          // queued / processing -> reflect progress and keep waiting
+          if (job.status && job.status !== msg.status) {
+            patchMessage(messageId, { status: job.status });
+          }
+        }
+        // Timed out: leave an honest "still processing" note, allow a re-poll later.
+        polledJobsRef.current.delete(jobId);
+        patchMessage(messageId, { status: 'processing' });
+      })();
+    });
+  }, [messages]);
 
   // Sends the query to the real backend (POST /api/v1/analysis) and stores
   // an analysis_jobs row -- no AI model runs, so the response is a neutral
@@ -681,6 +813,81 @@ export function Workspace({
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.6, whiteSpace: 'pre-line', marginBottom: 'var(--space-3)' }}>
                   {msg.text}
                 </div>
+
+                {/* Agent visual output: model overlay image(s), detected
+                    regions (pixel or geo coords -- no CRS needed to render a
+                    pixel box), and the execution trace. */}
+                {(() => {
+                  const art = getAgentArtifacts(msg);
+                  if (!art.images.length && !art.detections.length && !art.steps.length) return null;
+                  return (
+                    <div style={{
+                      marginTop: 'var(--space-3)', marginBottom: 'var(--space-3)',
+                      padding: '12px', borderRadius: 'var(--radius-md)',
+                      background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                    }}>
+                      {art.images.length > 0 && (
+                        <div style={{ marginBottom: art.detections.length ? 10 : 0 }}>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                            {`Model output${art.images[0].producer ? ` (${art.images[0].producer})` : ''}`}
+                          </div>
+                          {art.images.map((im, iIdx) => (
+                            <img
+                              key={iIdx}
+                              src={im.url}
+                              alt={`${im.kind} overlay`}
+                              onClick={() => setActiveViewerImage(im.url)}
+                              title="Click to view in the main satellite panel"
+                              style={{
+                                display: 'block', maxWidth: '100%', borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                                marginBottom: iIdx < art.images.length - 1 ? 6 : 0,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {art.detections.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                            {`${art.detections.length} region${art.detections.length > 1 ? 's' : ''} detected`}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 6 }}>
+                            {art.detections.map((d, dIdx) => (
+                              <div key={dIdx} style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.18)', border: '1px solid var(--border-subtle)', fontSize: '0.74rem' }}>
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{d.label || 'region'}</div>
+                                {Array.isArray(d.bbox) && d.bbox.length === 4 && (
+                                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: '#38bdf8', marginTop: 2 }}>
+                                    [{d.bbox.map((n) => Math.round(n)).join(', ')}] px
+                                  </div>
+                                )}
+                                {d.confidence != null && (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', marginTop: 2 }}>
+                                    <span>Confidence</span>
+                                    <strong style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{Math.round(d.confidence * 100)}%</strong>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {art.steps.length > 0 && (
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)', fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>Pipeline</span>
+                          {art.steps.map((s, sIdx) => (
+                            <span key={sIdx} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              {sIdx > 0 && <span style={{ opacity: 0.5 }}>→</span>}
+                              <span style={{ fontFamily: 'var(--font-mono)', color: s.status === 'success' ? 'var(--accent)' : 'var(--color-error)' }}>{s.tool}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Custom Model Inference Details Card */}
                 {msg.isCustomModel && msg.modelResult && (

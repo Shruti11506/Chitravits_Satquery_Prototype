@@ -20,7 +20,12 @@ from app.validation.errors import (
     MODALITY_MISMATCH,
     NOT_DISTINCT_OBSERVATIONS,
 )
-from app.validation.schemas import ChangeDetectionImageMetadata, ChangeDetectionRequirements
+from app.validation.schemas import (
+    CHAT_GATE_REQUIREMENTS,
+    ChangeDetectionImageMetadata,
+    ChangeDetectionRequirements,
+    RasterFacts,
+)
 from tests.images import unique_color, unique_fill
 
 ENDPOINT = "/api/v1/validation/change-detection"
@@ -212,6 +217,54 @@ def test_exact_dimensions_not_enforced_when_disabled():
     relaxed = ChangeDetectionRequirements(require_exact_dimensions=False)
     result = validate_change_detection_inputs(t1, t2, relaxed)
     assert result.valid is True, result.errors
+
+
+# ---- CHAT_GATE_REQUIREMENTS: the profile the frontend actually uses ----------
+# Regression for the "1.01 vs 0.99 blocked" production bug. The chat gate must
+# accept pairs that are safely normalisable (same aspect at a different
+# resolution, or a small aspect difference) and still reject genuinely
+# incompatible framings -- without changing the strict profile.
+
+
+def test_chat_gate_accepts_clearly_compatible_pair():
+    t1 = optical_scene("T1", width=512, height=512, imagery_id="a")
+    t2 = optical_scene("T2", width=512, height=512, imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, CHAT_GATE_REQUIREMENTS)
+    assert result.valid is True, result.errors
+
+
+def test_chat_gate_accepts_small_aspect_difference_1_01_vs_0_99():
+    # The exact reported case: aspect 1.01 vs 0.99.
+    t1 = optical_scene("T1", width=1010, height=1000, imagery_id="a")  # 1.010
+    t2 = optical_scene("T2", width=990, height=1000, imagery_id="b")   # 0.990
+    result = validate_change_detection_inputs(t1, t2, CHAT_GATE_REQUIREMENTS)
+    assert result.valid is True, result.errors
+
+
+def test_chat_gate_accepts_same_aspect_different_resolution():
+    t1 = optical_scene("T1", width=400, height=400, imagery_id="a")
+    t2 = optical_scene("T2", width=100, height=100, imagery_id="b")
+    result = validate_change_detection_inputs(t1, t2, CHAT_GATE_REQUIREMENTS)
+    assert result.valid is True, result.errors
+
+
+def test_chat_gate_rejects_clearly_incompatible_aspect():
+    t1 = optical_scene("T1", width=1920, height=1080, imagery_id="a")  # 1.778 (16:9)
+    t2 = optical_scene("T2", width=1024, height=768, imagery_id="b")   # 1.333 (4:3)
+    result = validate_change_detection_inputs(t1, t2, CHAT_GATE_REQUIREMENTS)
+    assert result.valid is False
+    assert result.errors[0].code == ASPECT_RATIO_MISMATCH
+
+
+def test_chat_gate_missing_dimensions_preserves_existing_behaviour():
+    # Missing size -> the aspect check can't run and returns no issue (a
+    # zero/missing dimension is covered by INVALID_DIMENSIONS elsewhere). The
+    # relaxation introduces no aspect/dimension false-accept or false-reject.
+    from app.validation.dimension_validator import aspect_ratio_issue
+
+    missing = RasterFacts(format="TIFF", width=None, height=None)
+    present = RasterFacts(format="TIFF", width=512, height=512)
+    assert aspect_ratio_issue(missing, present, tolerance=0.05, t1_label="T1", t2_label="T2") is None
 
 
 # ---- section 5: general band/channel structure -----------------------------------
@@ -537,17 +590,32 @@ def test_unknown_unknown_geotiff_pair_valid_via_api(client, fake_supabase):
     assert body["errors"] == []
 
 
-def test_unknown_unknown_geotiff_dimension_mismatch_via_api(client, fake_supabase):
-    """End-to-end API test: two unknown GeoTIFFs with mismatched dimensions return IMAGE_DIMENSION_MISMATCH."""
-    t1 = _upload(client, "u1.tif", _geotiff(descriptions=[], width=200, height=200))
-    t2 = _upload(client, "u2.tif", _geotiff(descriptions=[], width=100, height=100))
+def test_unknown_unknown_geotiff_incompatible_aspect_via_api(client, fake_supabase):
+    """End-to-end API test: two unknown GeoTIFFs with genuinely different aspect
+    ratios (16:9 vs 4:3) are rejected with ASPECT_RATIO_MISMATCH. A same-aspect
+    pair at different resolutions is accepted (see
+    test_unknown_unknown_geotiff_same_aspect_accepted_via_api)."""
+    t1 = _upload(client, "u1.tif", _geotiff(descriptions=[], width=1920, height=1080))
+    t2 = _upload(client, "u2.tif", _geotiff(descriptions=[], width=1024, height=768))
     response = client.post(ENDPOINT, json={"t1_imagery_id": t1["id"], "t2_imagery_id": t2["id"]})
     assert response.status_code == 200
     body = response.json()["data"]
     assert body["status"] == "REJECT"
     assert body["valid"] is False
-    assert body["errors"][0]["code"] == IMAGE_DIMENSION_MISMATCH
-    assert body["error_code"] == IMAGE_DIMENSION_MISMATCH
+    assert body["errors"][0]["code"] == ASPECT_RATIO_MISMATCH
+    assert body["error_code"] == ASPECT_RATIO_MISMATCH
+
+
+def test_unknown_unknown_geotiff_same_aspect_accepted_via_api(client, fake_supabase):
+    """Same aspect ratio at different resolutions is safely normalisable, so the
+    chat gate accepts it rather than blocking on exact-dimension inequality."""
+    t1 = _upload(client, "u1.tif", _geotiff(descriptions=[], width=200, height=200))
+    t2 = _upload(client, "u2.tif", _geotiff(descriptions=[], width=100, height=100))
+    response = client.post(ENDPOINT, json={"t1_imagery_id": t1["id"], "t2_imagery_id": t2["id"]})
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["status"] == "VALID", body["errors"]
+    assert body["valid"] is True
 
 
 def test_geotiff_with_tags_detected_properly():

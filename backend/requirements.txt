@@ -14,3 +14,17 @@ Pillow>=10,<13
 reportlab>=4,<5
 # IANA timezones for zoneinfo (report timestamps) on systems without a tz database (Windows, slim images).
 tzdata>=2024.1
+
+# --- SatQuery agent (app/agent_bridge) --------------------------------------
+# The `satquery` package provides the LangGraph agent + remote wrapper clients
+# that the agent bridge drives. It is NOT vendored into this repo. Install it
+# into the backend environment; the bridge is only imported when AGENT_ENABLED
+# is true, so this dependency is optional for the pre-agent behavior.
+#
+# Local development (editable, from the sibling checkout):
+#   pip install -e ../../Agent            # adjust to wherever D:\SatQuery\Agent lives
+# For a container/deploy, pin a git ref or a built wheel instead, e.g.:
+#   satquery @ git+https://github.com/<org>/<agent-repo>.git@<sha>
+# (left commented so `pip install -r requirements.txt` stays deploy-neutral until
+# the deployment source for the package is decided.)
+# satquery

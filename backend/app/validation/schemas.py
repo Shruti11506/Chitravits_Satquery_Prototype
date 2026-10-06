@@ -213,10 +213,19 @@ class ChangeDetectionRequirements:
 # `POST /validation/change-detection` (which the frontend calls after every
 # pair upload). Demo-friendly: sensor evidence optional, and geospatial
 # checks only when an image actually carries georeferencing, so two plain
-# JPEG/PNG images still pair. Modality, bands, dimensions (the deferred
-# gates, kept ON here) and dtype are still enforced.
+# JPEG/PNG images still pair. Modality, bands and dtype are still enforced.
+#
+# Dimensions: MCD-Mamba tiles and compares on a common grid, and the agent
+# resamples the pair to a shared size before inference (see the agent's
+# MCD-Mamba path), so two captures of the same scene at different resolutions
+# -- or with a small, safely-normalisable aspect difference -- must NOT be
+# blocked. The aspect check therefore uses a 5% RELATIVE tolerance (a
+# genuinely different framing like 16:9 vs 4:3 is still rejected) and exact
+# pixel equality is NOT required. Truly incompatible pairs still fail on
+# modality, bands, CRS or aspect.
 CHAT_GATE_REQUIREMENTS = ChangeDetectionRequirements(
-    require_geospatial=False, geospatial_when_present=True, aspect_ratio_tolerance=0.01, require_exact_dimensions=True
+    require_geospatial=False, geospatial_when_present=True,
+    aspect_ratio_tolerance=0.05, require_exact_dimensions=False,
 )
 # Opt-in (`"profile": "strict"`): the sensor must be one of the four
 # supported ones, and both images must be georeferenced.
